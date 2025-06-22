@@ -1024,7 +1024,7 @@ namespace {
         }
 
         // Decode base64 to binary audio data
-        std::string audio_data = TextUtils::Base64Decode(base64_audio);
+        std::string audio_data = TextUtils::Base64Decode<char>(base64_audio);
         VoiceLog("Google voice generation successful, decoded %zu bytes", audio_data.size());
         return audio_data;
     }

@@ -40,6 +40,7 @@
 #include <Modules/NPCVoiceModule.h>
 #include <Modules/LoginModule.h>
 
+#include <Windows/AccountInventoryWindow.h>
 #include <Windows/PconsWindow.h>
 #include <Windows/HotkeysWindow.h>
 #include <Windows/BuildsWindow.h>
@@ -212,7 +213,8 @@ namespace {
         DupingWindow::Instance(),
         ArmoryWindow::Instance(),
         EnemyWindow::Instance(),
-        TargetInfoWindow::Instance()
+        TargetInfoWindow::Instance(),
+        {AccountInventoryWindow::Instance(), false}
     };
 
     bool modules_sorted = false;
