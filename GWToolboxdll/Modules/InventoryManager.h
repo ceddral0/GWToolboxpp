@@ -234,6 +234,7 @@ public:
         }
     };
 
+    static uint16_t MoveItem(const Item* item, const uint16_t quantity = 1000u);
     Item* GetNextUnsalvagedItem(const Item* salvage_kit = nullptr, const Item* start_after_item = nullptr);
     Item* GetNextUnidentifiedItem(const Item* start_after_item = nullptr) const;
     void Identify(const Item* item, const Item* kit);
