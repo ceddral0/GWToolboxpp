@@ -40,6 +40,7 @@
 #include <Modules/GamepadModule.h>
 #include <Modules/CameraUnlockModule.h>
 
+#include <Windows/AccountInventoryWindow.h>
 #include <Windows/PconsWindow.h>
 #include <Windows/HotkeysWindow.h>
 #include <Windows/BuildsWindow.h>
@@ -215,7 +216,8 @@ namespace {
         TargetInfoWindow::Instance(),
         DropTrackerWindow::Instance(),
         GWMarketWindow::Instance(),
-        InventorySorting::Instance()
+        InventorySorting::Instance(),
+        {AccountInventoryWindow::Instance(), false}
     };
 
     bool modules_sorted = false;
