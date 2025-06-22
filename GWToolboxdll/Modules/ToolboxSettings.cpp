@@ -41,6 +41,7 @@
 #include <Modules/LoginModule.h>
 #include <Modules/UIScaler.h>
 
+#include <Windows/AccountInventoryWindow.h>
 #include <Windows/PconsWindow.h>
 #include <Windows/HotkeysWindow.h>
 #include <Windows/BuildsWindow.h>
@@ -191,6 +192,7 @@ namespace {
     };
 
     std::vector<WindowToggle> optional_windows = {
+        {AccountInventoryWindow::Instance(), false},
         PconsWindow::Instance(),
         HotkeysWindow::Instance(),
         BuildsWindow::Instance(),
