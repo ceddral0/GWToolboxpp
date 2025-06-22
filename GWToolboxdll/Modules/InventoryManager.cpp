@@ -479,42 +479,6 @@ namespace {
     }
 
 
-    // Move a whole stack into/out of storage
-    uint16_t move_item(const InventoryManager::Item* item, const uint16_t quantity = 1000u)
-    {
-        // Expected behaviors
-        //  When clicking on item in inventory
-        //   case storage close (or move_item_to_current_storage_pane = false):
-        //    - If the item is a material, it look if it can move it to the material page.
-        //    - If the item is stackable, search in all the storage if there is already similar items and completes the stack
-        //    - If not everything was moved, move the remaining in the first empty slot of the storage.
-        //   case storage open:
-        //    - If the item is a material, it look if it can move it to the material page.
-        //    - If the item is stackable, search for incomplete stacks in the current storage page and completes them
-        //    - If not everything was moved, move the remaining in the first empty slot of the current page.
-
-        // @Fix:
-        //  There is a bug in gw that doesn't "save" if the material storage
-        //  (or anniversary storage in the case when the player bought all other storage)
-        //  so we cannot know if they are the storage selected.
-        //  Sol: The solution is to patch the value 7 -> 9 at 0040E851 (EB 20 33 C0 BE 06 [-5])
-        // @Cleanup: Bad
-        if (item->model_file_id == 0x0002f301) {
-            Log::Error("Ctrl+click doesn't work with birthday presents yet");
-            return 0;
-        }
-        const bool is_inventory_item = item->IsInventoryItem();
-        uint16_t remaining = std::min<uint16_t>(item->quantity, quantity);
-        if (is_inventory_item) {
-            remaining -= move_item_to_storage(item, remaining);
-        }
-        else {
-            remaining -= move_item_to_inventory(item, remaining);
-        }
-        pending_moves.clear();
-        return remaining;
-    }
-
     GW::Merchant::TransactionType requesting_quote_type = (GW::Merchant::TransactionType)0;
 
     GW::UI::WindowPosition* inventory_bags_window_position = nullptr;
@@ -877,7 +841,7 @@ void InventoryManager::OnUIMessage(GW::HookStatus* status, const GW::UI::UIMessa
             }
             instance.stack_prompt_item_id = 0;
             status->blocked = true;
-            move_item((InventoryManager::Item*)GW::Items::GetItemById(item_id), static_cast<uint16_t>(quantity));
+            MoveItem((InventoryManager::Item*)GW::Items::GetItemById(item_id), static_cast<uint16_t>(quantity));
         } break;
         // Quote for item has been received
         case GW::UI::UIMessage::kVendorQuote: {
@@ -2074,7 +2038,7 @@ bool InventoryManager::DrawItemContextMenu(const bool open)
     if (GW::Map::GetInstanceType() == GW::Constants::InstanceType::Outpost) {
         if (bag && ImGui::Button(context_item_actual->IsInventoryItem() ? "Store Item" : "Withdraw Item", size)) {
             ImGui::CloseCurrentPopup();
-            move_item(context_item_actual);
+            MoveItem(context_item_actual);
             goto end_popup;
         }
         char c_all_label[128];
@@ -2244,6 +2208,42 @@ end_popup:
     return true;
 }
 
+// Move a whole stack into/out of storage
+uint16_t InventoryManager::MoveItem(const Item* item, const uint16_t quantity)
+{
+    // Expected behaviors
+    //  When clicking on item in inventory
+    //   case storage close (or move_item_to_current_storage_pane = false):
+    //    - If the item is a material, it look if it can move it to the material page.
+    //    - If the item is stackable, search in all the storage if there is already similar items and completes the stack
+    //    - If not everything was moved, move the remaining in the first empty slot of the storage.
+    //   case storage open:
+    //    - If the item is a material, it look if it can move it to the material page.
+    //    - If the item is stackable, search for incomplete stacks in the current storage page and completes them
+    //    - If not everything was moved, move the remaining in the first empty slot of the current page.
+
+    // @Fix:
+    //  There is a bug in gw that doesn't "save" if the material storage
+    //  (or anniversary storage in the case when the player bought all other storage)
+    //  so we cannot know if they are the storage selected.
+    //  Sol: The solution is to patch the value 7 -> 9 at 0040E851 (EB 20 33 C0 BE 06 [-5])
+    // @Cleanup: Bad
+    if (item->model_file_id == 0x0002f301) {
+        Log::Error("Ctrl+click doesn't work with birthday presents yet");
+        return 0;
+    }
+    const bool is_inventory_item = item->IsInventoryItem();
+    uint16_t remaining = std::min<uint16_t>(item->quantity, quantity);
+    if (is_inventory_item) {
+        remaining -= move_item_to_storage(item, remaining);
+    }
+    else {
+        remaining -= move_item_to_inventory(item, remaining);
+    }
+    pending_moves.clear();
+    return remaining;
+}
+
 void InventoryManager::ItemClickCallback(GW::HookStatus* status, const uint32_t type, const uint32_t slot, const GW::Bag* bag)
 {
     InventoryManager& im = Instance();
@@ -2294,7 +2294,7 @@ void InventoryManager::ItemClickCallback(GW::HookStatus* status, const uint32_t 
                         prompt_split_stack(item);
                     }
                     else {
-                        move_item(item);
+                        MoveItem(item);
                     }
                     return;
                 }

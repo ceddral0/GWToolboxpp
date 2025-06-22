@@ -311,6 +311,96 @@ namespace TextUtils {
         return path;
     }
 
+    std::string Base64EncodeW(std::wstring_view decoded)
+    {
+        const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string encoded;
+        std::vector<int> T(64);
+
+        for (int i = 0; i < 64; i++)
+            T[i] = chars[i];
+
+        int val = 0, valb = -6;
+        for (wchar_t c : decoded) {
+            val = (val << 16) + c;
+            valb += 16;
+            while (valb >= 0) {
+                encoded.push_back(char(T[(val >> valb) & 0x3F]));
+                valb -= 6;
+            }
+        }
+        if (valb != -6) {
+            val = (val << 8);
+            valb += 8;
+            encoded.push_back(char(T[(val >> valb) & 0x3F]));
+            valb -= 6;
+        }
+        while (valb != -6) {
+            if (0 > valb && valb > -6) {
+                valb += 8;
+            }
+            encoded.push_back('=');
+            valb -= 6;
+        }
+        return encoded;
+    }
+
+    std::wstring Base64DecodeW(std::string_view encoded)
+    {
+        const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::wstring decoded;
+        std::vector<int> T(256, -1);
+
+        for (int i = 0; i < 64; i++)
+            T[chars[i]] = i;
+
+        int val = 0, valb = -16;
+        for (unsigned char c : encoded) {
+            if (T[c] == -1) break;
+            val = (val << 6) + T[c];
+            valb += 6;
+            if (valb >= 0) {
+                decoded.push_back(wchar_t((val >> valb) & 0xFFFF));
+                valb -= 16;
+            }
+        }
+        return decoded;
+    }
+
+    std::string Base64Encode(std::string_view decoded)
+    {
+        const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string encoded;
+        std::vector<int> T(64);
+
+        for (int i = 0; i < 64; i++)
+            T[i] = chars[i];
+
+        int val = 0, valb = -6;
+        for (unsigned char c : decoded) {
+            val = (val << 8) + c;
+            valb += 8;
+            while (valb >= 0) {
+                encoded.push_back(char(T[(val >> valb) & 0x3F]));
+                valb -= 6;
+            }
+        }
+        if (valb != -6) {
+            val = (val << 8);
+            valb += 8;
+            encoded.push_back(char(T[(val >> valb) & 0x3F]));
+            valb -= 6;
+        }
+        while (valb != -6) {
+            if (0 > valb && valb > -6) {
+                valb += 8;
+            }
+            encoded.push_back('=');
+            valb -= 6;
+        }
+        return encoded;
+    }
+
     std::string Base64Decode(std::string_view encoded)
     {
         const std::string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
