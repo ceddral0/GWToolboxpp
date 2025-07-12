@@ -1743,6 +1743,22 @@ void GameSettings::Initialize()
     GW::FriendListMgr::RegisterFriendStatusCallback(&FriendStatusCallback_Entry, FriendStatusCallback);
     RegisterUIMessageCallback(&OnPreSendDialog_Entry, GW::UI::UIMessage::kSendPingWeaponSet, OnPingWeaponSet);
 
+    // 477
+    //RegisterUIMessageCallback(&OnItemUpdate_Entry, GW::UI::UIMessage::kItemUpdated, OnItemUpdate);
+    // 478
+    //RegisterUIMessageCallback(&OnEquipmentUpdate_Entry, GW::UI::UIMessage::kEquipmentSlotUpdated, OnEquipmentUpdate);
+    // 479
+    //RegisterUIMessageCallback(&OnEquipmentClear_Entry, GW::UI::UIMessage::kEquipmentSlotCleared, OnEquipmentClear);
+    // 480
+    //RegisterUIMessageCallback(&OnInventoryUpdate_Entry, GW::UI::UIMessage::kInventorySlotUpdated, OnInventoryUpdate);
+    // 481
+    //RegisterUIMessageCallback(&OnInventoryClear_Entry, GW::UI::UIMessage::kInventorySlotCleared, OnInventoryClear);
+    // 482
+    //RegisterUIMessageCallback(&OnPartyAddHero_Entry, GW::UI::UIMessage::kPartyAddHero, OnPartyAddHero);
+    // 483
+    //RegisterUIMessageCallback(&OnPartyRemoveHero_Entry, GW::UI::UIMessage::kPartyRemoveHero, OnPartyRemoveHero);
+
+
     constexpr GW::UI::UIMessage party_target_ui_messages[] = {
         GW::UI::UIMessage::kTargetPlayerPartyMember,
         GW::UI::UIMessage::kTargetNPCPartyMember,
