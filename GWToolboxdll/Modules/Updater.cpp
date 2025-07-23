@@ -303,7 +303,8 @@ void Updater::CheckForUpdate(const bool forced)
 
 bool Updater::IsLatestVersion()
 {
-    return is_latest_version;
+    return true;
+    //return is_latest_version;
 }
 
 void Updater::Draw(IDirect3DDevice9*)
