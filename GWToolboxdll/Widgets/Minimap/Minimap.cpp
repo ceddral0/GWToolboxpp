@@ -221,18 +221,14 @@ namespace {
 
         GW::Vec2f v(static_cast<float>(pos.x), static_cast<float>(pos.y));
 
-        // Invert viewport projection
-        v.x = v.x - default_minimap_context.top_left.x;
-        v.y = default_minimap_context.top_left.y - v.y;
-
-        // go from [0, width][0, height] to [-1, 1][-1, 1]
+        // Translate so the minimap center is the origin, and flip Y
         const auto size = default_minimap_context.size();
-        v.x = 2.0f * v.x / size.x - 1.0f;
-        v.y = 2.0f * v.y / size.x + 1.0f;
+        v.x = v.x - (default_minimap_context.top_left.x + size.x * 0.5f);
+        v.y = (default_minimap_context.top_left.y + size.y * 0.5f) - v.y;
 
-        // scale up to [-w, w]
+        // Scale to game units: base_scale (= size.x) spans ±5000
         constexpr float w = 5000.0f;
-        v *= w;
+        v *= 2.0f * w / size.x;
 
         // translate by camera
         v -= translation;
@@ -256,17 +252,13 @@ namespace {
     {
         GW::Vec2f v(static_cast<float>(pos.x), static_cast<float>(pos.y));
 
-        // Invert y direction
+        // Flip Y (no translation needed for vectors)
         v.y = -v.y;
 
-        // go from [0, width][0, height] to [-1, 1][-1, 1]
+        // Scale to game units: base_scale (= size.x) spans ±5000
         const auto size = default_minimap_context.size();
-        v.x = 2.0f * v.x / size.x;
-        v.y = 2.0f * v.y / size.x;
-
-        // scale up to [-w, w]
         constexpr float w = 5000.0f;
-        v *= w;
+        v *= 2.0f * w / size.x;
 
         return v;
     }
