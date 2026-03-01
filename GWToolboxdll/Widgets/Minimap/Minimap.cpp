@@ -604,7 +604,7 @@ namespace {
         return true;
     }
 
-    void DrawNSEW(const GW::Agent* me,const MinimapRenderContext& context)
+    void DrawNSEW(const MinimapRenderContext& context)
     {
         if ((context.cardinal_color & IM_COL32_A_MASK) == 0) return;
         // -------------------------------------------------------------------------
@@ -646,24 +646,24 @@ namespace {
 
         struct Cardinal {
             const char* text;
-            float dx;
-            float dy;
+            GW::Vec2f offset;
             float label_angle; // per-label rotation for rotated mode
         };
         const Cardinal cardinals[] = {
-            {"N", 0.f, radius, map_angle},
-            {"S", 0.f, -radius, map_angle + DirectX::XM_PI},
-            {"E", radius, 0.f, map_angle + DirectX::XM_PIDIV2},
-            {"W", -radius, 0.f, map_angle + DirectX::XM_PI + DirectX::XM_PIDIV2},
+            {"N", {0.f, radius}, map_angle},
+            {"S", {0.f, -radius}, map_angle + DirectX::XM_PI},
+            {"E", {radius, 0.f}, map_angle + DirectX::XM_PIDIV2},
+            {"W", {-radius, 0.f}, map_angle + DirectX::XM_PI + DirectX::XM_PIDIV2},
         };
 
+        auto cardinal_offset_scale = context.base_scale * 0.5f / GW::Constants::Range::Compass;
         if (cardinal_upright) {
             // ------------------------------------------------------------------
             // Fast path: axis-aligned text via AddText.
             // ------------------------------------------------------------------
             for (const auto& c : cardinals) {
-                const GW::Vec2f world_pos = {me->pos.x + c.dx, me->pos.y + c.dy};
-                const ImVec2 screen = WorldToScreen(world_pos, context, me->pos);
+                auto offset = GW::Rotate(c.offset * cardinal_offset_scale, -map_angle);
+                const ImVec2 screen = {context.anchor_point.x + offset.x, context.anchor_point.y - offset.y};
                 const ImVec2 text_size = font->CalcTextSizeA(render_size, FLT_MAX, 0.f, c.text);
                 const ImVec2 draw_pos = {screen.x - text_size.x * 0.5f, screen.y - text_size.y * 0.5f};
 
@@ -724,8 +724,8 @@ namespace {
             };
 
             for (const auto& c : cardinals) {
-                const GW::Vec2f world_pos = {me->pos.x + c.dx, me->pos.y + c.dy};
-                const ImVec2 screen = WorldToScreen(world_pos, context, me->pos);
+                auto offset = GW::Rotate(c.offset * cardinal_offset_scale, -map_angle);
+                const ImVec2 screen = {context.anchor_point.x + offset.x, context.anchor_point.y - offset.y};
 
                 // Shadow: 1 px along the label's own screen-down direction
                 const float ca_s = std::cos(c.label_angle);
@@ -1603,7 +1603,7 @@ void Minimap::Render(IDirect3DDevice9* device, const MinimapRenderContext& conte
     instance.effect_renderer.Render(device);
     instance.pingslines_renderer.Render(device);
     
-    DrawNSEW(me, context);
+    DrawNSEW(context);
 
     if (context.circular_map) {
         device->SetRenderState(D3DRS_STENCILREF, 0);
