@@ -615,7 +615,7 @@ namespace {
         if (!show_elite_capture_locations[(uint32_t)skill->profession]) return false;
         if (hide_captured_elites) {
             const auto me = GW::Agents::GetControlledCharacter();
-            if (me->primary == (uint8_t)skill->profession || me->secondary == (uint8_t)skill->profession) {
+            if (me->primary == skill->profession || me->secondary == skill->profession) {
                 if (GW::SkillbarMgr::GetIsSkillLearnt(boss.skill_id)) return false;
             }
             else {

@@ -567,6 +567,10 @@ namespace GW {
             const auto held_item = agent && agent->GetIsLivingType() ? GW::Items::GetItemById(agent->weapon_item_id) : 0;
             return held_item && held_item->type == GW::Constants::ItemType::Bundle;
         }
+        void AsyncGetAgentName(const uint32_t agent_id, std::wstring& out)
+        {
+            UI::AsyncDecodeStr(GetAgentEncName(agent_id), &out);
+        }
         void AsyncGetAgentName(const Agent* agent, std::wstring& out)
         {
             UI::AsyncDecodeStr(GetAgentEncName(agent), &out);

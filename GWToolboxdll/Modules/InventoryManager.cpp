@@ -190,7 +190,7 @@ namespace {
         return a && b && wcscmp(a, b) == 0;
     }
 
-    bool GetIsProfessionUnlocked(GW::Constants::Profession prof)
+    bool GetIsProfessionUnlocked(GW::Constants::ProfessionByte prof)
     {
         const auto world = GW::GetWorldContext();
         const auto player = GW::PlayerMgr::GetPlayerByID();
@@ -744,7 +744,7 @@ namespace {
         }
     }
 
-    GW::Constants::Profession tome_pending_profession;
+    GW::Constants::ProfessionByte tome_pending_profession;
     time_t tome_pending_timeout = 0;
     uint32_t tome_pending_item_id = 0;
 
@@ -764,7 +764,7 @@ namespace {
             return;
         }
         if (tome_pending_stage == PromptUser) {
-            if (player->secondary == static_cast<uint8_t>(tome_pending_profession) || player->primary == static_cast<uint8_t>(tome_pending_profession)) {
+            if (player->secondary == tome_pending_profession || player->primary == tome_pending_profession) {
                 tome_pending_stage = UseItem;
                 return;
             }
@@ -797,7 +797,7 @@ namespace {
 
         switch (tome_pending_stage) {
             case ChangeProfession: {
-                if (player->secondary == static_cast<uint8_t>(tome_pending_profession)) {
+                if (player->secondary == tome_pending_profession) {
                     tome_pending_stage = UseItem;
                     return;
                 }
@@ -806,13 +806,13 @@ namespace {
                     return;
                 }
                 GW::GameThread::Enqueue([] {
-                    GW::PlayerMgr::ChangeSecondProfession(tome_pending_profession);
+                    GW::PlayerMgr::ChangeSecondProfession((GW::Constants::Profession)tome_pending_profession);
                     });
                 tome_pending_stage = AwaitProfession;
                 return;
             }
             case AwaitProfession: {
-                if (player->secondary == static_cast<uint8_t>(tome_pending_profession)) {
+                if (player->secondary == tome_pending_profession) {
                     tome_pending_stage = UseItem;
                 }
                 return;
@@ -825,7 +825,7 @@ namespace {
         tome_pending_stage = None;
         tome_pending_timeout = 0;
         tome_pending_item_id = 0;
-        tome_pending_profession = GW::Constants::Profession::None;
+        tome_pending_profession = GW::Constants::ProfessionByte::None;
     }
 
     void OnUseItem(GW::HookStatus* status, const uint32_t item_id)
@@ -840,50 +840,50 @@ namespace {
         if (!item) {
             return;
         }
-        auto profession_needed = GW::Constants::Profession::None;
+        auto profession_needed = GW::Constants::ProfessionByte::None;
         switch (item->model_id) {
             case 21786:
             case 21796:
-                profession_needed = GW::Constants::Profession::Assassin;
+                profession_needed = GW::Constants::ProfessionByte::Assassin;
                 break;
             case 21787:
             case 21797:
-                profession_needed = GW::Constants::Profession::Mesmer;
+                profession_needed = GW::Constants::ProfessionByte::Mesmer;
                 break;
             case 21788:
             case 21798:
-                profession_needed = GW::Constants::Profession::Necromancer;
+                profession_needed = GW::Constants::ProfessionByte::Necromancer;
                 break;
             case 21789:
             case 21799:
-                profession_needed = GW::Constants::Profession::Elementalist;
+                profession_needed = GW::Constants::ProfessionByte::Elementalist;
                 break;
             case 21790:
             case 21800:
-                profession_needed = GW::Constants::Profession::Monk;
+                profession_needed = GW::Constants::ProfessionByte::Monk;
                 break;
             case 21791:
             case 21801:
-                profession_needed = GW::Constants::Profession::Warrior;
+                profession_needed = GW::Constants::ProfessionByte::Warrior;
                 break;
             case 21792:
             case 21802:
-                profession_needed = GW::Constants::Profession::Ranger;
+                profession_needed = GW::Constants::ProfessionByte::Ranger;
                 break;
             case 21793:
             case 21803:
-                profession_needed = GW::Constants::Profession::Dervish;
+                profession_needed = GW::Constants::ProfessionByte::Dervish;
                 break;
             case 21794:
             case 21804:
-                profession_needed = GW::Constants::Profession::Ritualist;
+                profession_needed = GW::Constants::ProfessionByte::Ritualist;
                 break;
             case 21795:
             case 21805:
-                profession_needed = GW::Constants::Profession::Paragon;
+                profession_needed = GW::Constants::ProfessionByte::Paragon;
                 break;
         }
-        if (profession_needed != GW::Constants::Profession::None) {
+        if (profession_needed != GW::Constants::ProfessionByte::None) {
             tome_pending_profession = profession_needed;
             tome_pending_item_id = item_id;
             tome_pending_stage = PromptUser;
