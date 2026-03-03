@@ -48,4 +48,4 @@ target_include_directories(imgui PUBLIC
 target_compile_definitions(imgui PUBLIC 
     IMGUI_USER_CONFIG="${CMAKE_CURRENT_LIST_DIR}/../GWToolboxdll/imconfig.h")
 
-set_target_properties(imgui PROPERTIES FOLDER "${CMAKE_CURRENT_LIST_DIR}/../Dependencies/")
+set_target_properties(imgui PROPERTIES FOLDER "Dependencies/")
