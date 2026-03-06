@@ -24,8 +24,18 @@ file(GLOB SOURCES
      
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${SOURCES})
 target_sources(GWToolboxdll PRIVATE ${SOURCES})
- 
+
+# auto-generated files - export header & pch 
+include(GenerateExportHeader)
+generate_export_header(GWToolboxdll)
+#target_sources(GWToolboxdll PRIVATE FILE_SET generated_header TYPE HEADERS BASE_DIRS ${CMAKE_CURRENT_BINARY_DIR} FILES ${CMAKE_CURRENT_BINARY_DIR}/gwtoolboxdll_export.h)
+target_sources(GWToolboxdll PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gwtoolboxdll_export.h)
+target_include_directories(GWToolboxdll PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+source_group(Generated FILES ${CMAKE_CURRENT_BINARY_DIR}/gwtoolboxdll_export.h)
+
 target_precompile_headers(GWToolboxdll PRIVATE "stdafx.h")
+source_group(Generated REGULAR_EXPRESSION cmake_pch)
+
 target_compile_definitions(GWToolboxdll PRIVATE
     "_USRDLL"
     "GWCA_IMPORT"
@@ -88,7 +98,7 @@ target_link_libraries(GWToolboxdll PRIVATE
     Dbghelp.lib # for MiniDump
 	delayimp # for delay loading gwca
     )
-      
+
 file(GLOB FXC_PATHS "C:/Program Files (x86)/Windows Kits/10/bin/*/x86")
 find_program(FXC fxc DOC "hlsl compiler" PATHS ${FXC_PATHS})
 if(NOT FXC)
