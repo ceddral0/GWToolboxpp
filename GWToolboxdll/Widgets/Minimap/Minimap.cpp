@@ -1444,6 +1444,22 @@ void Minimap::Draw(IDirect3DDevice9* device)
     }
 }
 
+void Minimap::RegisterRenderer(MinimapRenderer* renderer)
+{
+    auto& inst = Instance();
+    ASSERT(std::ranges::find(inst.registered_renderers, renderer) == inst.registered_renderers.end());
+    inst.registered_renderers.push_back(renderer);
+}
+
+void Minimap::UnregisterRenderer(MinimapRenderer* renderer)
+{
+    auto& inst = Instance();
+    auto it = std::ranges::find(inst.registered_renderers, renderer);
+    if (it != inst.registered_renderers.end()) {
+        inst.registered_renderers.erase(it);
+    }
+}
+
 bool Minimap::ShouldMarkersDrawOnMap()
 {
     const auto map_has_outpost_and_explorable = [](const GW::Constants::MapID map_id) {
@@ -1602,6 +1618,8 @@ void Minimap::Render(IDirect3DDevice9* device, const MinimapRenderContext& conte
     instance.agent_renderer.Render(device);
     instance.effect_renderer.Render(device);
     instance.pingslines_renderer.Render(device);
+    for (auto renderer : instance.registered_renderers)
+        renderer->RenderMinimap(device, context);
     
     DrawNSEW(context);
 
