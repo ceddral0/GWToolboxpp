@@ -1,6 +1,6 @@
 add_library(GWToolboxdll SHARED)
 
-file(GLOB SOURCES
+file(GLOB SOURCES CONFIGURE_DEPENDS
     "*.h"
     "*.cpp"
     "GWToolbox.rc"
@@ -105,10 +105,10 @@ if(NOT FXC)
     message(SEND_ERROR "unable to find Fxc.exe for HLSL compilation")
 endif(NOT FXC)
 
-file(GLOB HLSL_VERTEX_SHADER_FILES
+file(GLOB HLSL_VERTEX_SHADER_FILES CONFIGURE_DEPENDS
     Widgets/Minimap/Shaders/*_vs.hlsl
 )
-file(GLOB HLSL_PIXEL_SHADER_FILES
+file(GLOB HLSL_PIXEL_SHADER_FILES CONFIGURE_DEPENDS
     Widgets/Minimap/Shaders/*_ps.hlsl
 )
 
