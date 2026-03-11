@@ -114,11 +114,11 @@ namespace {
         "5/5e/Paragon-tango-icon-48",
         "3/38/Dervish-tango-icon-48"
     };
-    std::map<uint32_t, IDirect3DTexture9**> profession_icons;
-    std::map<GW::Constants::SkillID, IDirect3DTexture9**> skill_images;
-    std::map<std::wstring, IDirect3DTexture9**> item_images;
-    std::map<std::string, IDirect3DTexture9**> guild_wars_wiki_images;
-    const std::map<std::string, const char*> damagetype_icon_urls = {
+    std::unordered_map<uint32_t, IDirect3DTexture9**> profession_icons;
+    std::unordered_map<GW::Constants::SkillID, IDirect3DTexture9**> skill_images;
+    std::unordered_map<std::wstring, IDirect3DTexture9**> item_images;
+    std::unordered_map<std::string, IDirect3DTexture9**> guild_wars_wiki_images;
+    const std::unordered_map<std::string, const char*> damagetype_icon_urls = {
         {"Blunt damage", "1/19/Blunt_damage.png/60px-Blunt_damage.png"},
         {"Piercing damage", "1/1a/Piercing_damage.png/60px-Piercing_damage.png"},
         {"Slashing damage", "3/3c/Slashing_damage.png/60px-Slashing_damage.png"},
@@ -129,9 +129,9 @@ namespace {
     };
 
     std::unordered_map<std::string, IDirect3DTexture9**> damagetype_icons;
-    std::map<GW::Constants::MapID, GuiUtils::EncString*> map_names;
-    std::map<GW::Constants::SkillID, GuiUtils::EncString*> skill_names;
-    std::map<GW::Constants::MapID, GuiUtils::EncString*> region_names;
+    std::unordered_map<GW::Constants::MapID, GuiUtils::EncString*> map_names;
+    std::unordered_map<GW::Constants::SkillID, GuiUtils::EncString*> skill_names;
+    std::unordered_map<GW::Constants::MapID, GuiUtils::EncString*> region_names;
     std::unordered_map<GW::Constants::Language, std::unordered_map<uint32_t, GuiUtils::EncString*>> encoded_string_ids;
     std::filesystem::path current_settings_folder;
     constexpr size_t MAX_WORKERS = 20;
