@@ -171,6 +171,7 @@ namespace GW {
     } // namespace UI
     namespace PlayerMgr {
         bool IsMelandrusAccord();
+        GW::GamePos* GetPlayerPosition();
     }
     namespace Agents {
         bool IsAgentCarryingBundle(uint32_t agent_id);

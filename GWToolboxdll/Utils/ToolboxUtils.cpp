@@ -559,6 +559,10 @@ namespace GW {
             const auto c = GW::PlayerMgr::GetPlayerByID();
             return (c->reforged_or_dhuums_flags & 0x2) != 0;
         }
+        GW::GamePos* GetPlayerPosition() {
+            const auto player = GW::Agents::GetControlledCharacter();
+            return player ? &player->pos : nullptr;
+        }
     } // namespace PlayerMgr
     namespace Agents {
         bool IsAgentCarryingBundle(uint32_t agent_id)
