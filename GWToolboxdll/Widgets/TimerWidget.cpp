@@ -8,7 +8,7 @@
 #include <GWCA/GameEntities/Skill.h>
 #include <GWCA/GameEntities/Map.h>
 
-#include <GWCA/Managers/MapMgr.h>
+#include <GWCA/Managers/MapMgr.h>f
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/EffectMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
@@ -65,7 +65,6 @@ namespace {
         {GW::Constants::SkillID::Famine, "Famine"},
         {GW::Constants::SkillID::Symbiosis, "Symbiosis"},
         {GW::Constants::SkillID::Winnowing, "Winnowing"},
-        {GW::Constants::SkillID::Frozen_Soil, "Frozen Soil"},
         {GW::Constants::SkillID::Union, "Union"},
         {GW::Constants::SkillID::Shelter, "Shelter"},
         {GW::Constants::SkillID::Displacement, "Displacement"},
