@@ -100,7 +100,7 @@ All images in `resources/icons` are from www.flaticon.com
 
 ## Sponsors
 
-<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" alt="JetBrains Logo" style="float: left" />
+<img src="https://resources.jetbrains.com/storage/products/company/brand/logos/jb_beam.png" alt="JetBrains Logo" width="36" />
 
 **[JetBrains](https://github.com/JetBrains)** provides core contributors with <a href="https://www.jetbrains.com/community/opensource">OSS Development Licenses</a>
 
