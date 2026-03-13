@@ -8,7 +8,7 @@
 #include <GWCA/GameEntities/Skill.h>
 #include <GWCA/GameEntities/Map.h>
 
-#include <GWCA/Managers/MapMgr.h>f
+#include <GWCA/Managers/MapMgr.h>
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/EffectMgr.h>
 #include <GWCA/Managers/StoCMgr.h>

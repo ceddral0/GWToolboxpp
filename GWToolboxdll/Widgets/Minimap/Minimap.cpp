@@ -43,6 +43,7 @@
 #include <Utils/TextUtils.h>
 #include "Minimap.h"
 #include <Utils/FontLoader.h>
+#include <Utils/ToolboxUtils.h>
 
 namespace {
     GW::HookEntry ChatCmd_HookEntry;

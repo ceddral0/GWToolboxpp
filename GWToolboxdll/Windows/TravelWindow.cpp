@@ -859,7 +859,8 @@ bool GetMapLabelPos(const GW::AreaInfo* map, GW::Vec2f* out)
     return out->x != 0.f;
 }
 
-GW::Constants::MapID TravelWindow::GetNearestOutpostToLocation(const GW::Continent continent, const GW::Vec2f& world_map_pos) {
+GW::Constants::MapID TravelWindow::GetNearestOutpostToLocation(const GW::AreaInfo* origin, const GW::Vec2f& world_map_pos) {
+    if (!origin) return GW::Constants::MapID::None;
     float nearest_distance = std::numeric_limits<float>::max();
     auto nearest_map_id = GW::Constants::MapID::None;
     GW::Vec2f map_pos;
@@ -868,7 +869,7 @@ GW::Constants::MapID TravelWindow::GetNearestOutpostToLocation(const GW::Contine
         if (!GW::Map::GetIsMapUnlocked(map_id)) continue;
         if (!(IsValidOutpost(map_id) && GW::Map::GetMapInfo(map_id)->GetIsOnWorldMap())) continue;
         const auto map_info = GW::Map::GetMapInfo(map_id);
-        if (!(map_info && map_info->continent == continent)) continue;
+        if (!(map_info && map_info->continent == origin->continent && map_info->campaign == origin->campaign)) continue;
         // if ((map_info->flags & 0x5000000) != 0)
         //    continue; // e.g. "wrong" augury rock is map 119, no NPCs
         if (!GetMapLabelPos(map_info, &map_pos)) continue;
@@ -887,10 +888,7 @@ GW::Constants::MapID TravelWindow::GetNearestOutpostToPlayer()
     if (!my_pos) return GW::Constants::MapID::None;
     GW::Vec2f world_map_pos;
     if (!WorldMapWidget::GamePosToWorldMap(*my_pos, world_map_pos)) return GW::Constants::MapID::None;
-
-    const auto map = GW::Map::GetMapInfo();
-    if (!map) return GW::Constants::MapID::None;
-    return GetNearestOutpostToLocation(map->continent, world_map_pos);
+    return GetNearestOutpostToLocation(GW::Map::GetMapInfo(), world_map_pos);
 }
 
 
@@ -917,7 +915,7 @@ GW::Constants::MapID TravelWindow::GetNearestOutpost(const GW::Constants::MapID 
     GW::Vec2f world_map_location;
     if(!GetMapLabelPos(this_map,&world_map_location))
         return GW::Constants::MapID::None;
-    return GetNearestOutpostToLocation(this_map->continent, world_map_location);
+    return GetNearestOutpostToLocation(this_map, world_map_location);
 }
 
 bool TravelWindow::IsWaitingForMapTravel()

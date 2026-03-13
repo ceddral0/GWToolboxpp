@@ -25,6 +25,7 @@
 #include <Widgets/Minimap/Minimap.h>
 
 #include "GWToolbox.h"
+#include <Utils/ToolboxUtils.h>
 
 constexpr auto AGENTCOLOR_INIFILENAME = L"AgentColors.ini";
 
