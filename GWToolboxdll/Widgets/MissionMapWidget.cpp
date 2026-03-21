@@ -524,6 +524,26 @@ namespace {
 
     GW::UI::Frame* mission_map_frame = nullptr;
 
+        struct FogGeometry {
+        struct GameVertex {
+            float x, y, z;
+            DWORD color;
+        };
+
+        static constexpr int MAX_VERTS = 1 << 19; // 512k — fog is smaller than static geo
+        GameVertex verts[MAX_VERTS];
+        int vert_count = 0;
+
+        GameVertex* Alloc(int count)
+        {
+            if (vert_count + count > MAX_VERTS) return nullptr;
+            GameVertex* ptr = verts + vert_count;
+            vert_count += count;
+            return ptr;
+        }
+    } fog_geo;
+
+
     bool IsScreenPosOnMissionMap(const GW::Vec2f& screen_pos)
     {
         if (!(mission_map_frame && mission_map_frame->IsVisible())) return false;
@@ -848,8 +868,8 @@ namespace {
         scissorRect.bottom = static_cast<LONG>(mission_map_bottom_right.y);
         dx_device->SetScissorRect(&scissorRect);
 
-// Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
-        if (static_map_geo.Any() || vb.fog_count) {
+        // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
+        if (static_map_geo.Any() || fog_geo.vert_count) {
             D3DVIEWPORT9 vp;
             dx_device->GetViewport(&vp);
             const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
@@ -872,8 +892,8 @@ namespace {
             if (static_map_geo.inaccessible_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_count / 3, static_map_geo.verts + static_map_geo.inaccessible_start, sizeof(StaticMapGeometry::GameVertex));
             if (static_map_geo.border_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.border_count / 3, static_map_geo.verts + static_map_geo.border_start, sizeof(StaticMapGeometry::GameVertex));
 
-            // Dynamic (rebuilt every frame — fog overlay, compass circle, frontier edges)
-            if (vb.fog_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.fog_count / 3, vb.game_arena + vb.fog_start, sizeof(VertexBuffers::GameVertex));
+            // Static fog (rebuilt when player moves)
+            if (fog_geo.vert_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.vert_count / 3, fog_geo.verts, sizeof(FogGeometry::GameVertex));
         }
 
         // Pass 2: Screen-space geometry — XYZRHW bypasses transform pipeline
@@ -1116,6 +1136,97 @@ namespace {
         return cached_walkable_grid[idx] && explored_cells[idx];
     }
 
+
+    int last_fog_player_cx = INT_MIN;
+    int last_fog_player_cy = INT_MIN;
+
+    void BuildFogGeometry()
+    {
+        fog_geo.vert_count = 0;
+
+        if (!explored_cells || !cached_walkable_grid) return;
+
+        constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
+        constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
+        constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
+        const float ft = FRONTIER_HALF_THICKNESS * cached_px_to_game; // frontier thickness in game units
+
+        const float grid_origin_x = cached_grid_x0 * BORDER_CELL_SIZE;
+        const float grid_origin_y = cached_grid_y0 * BORDER_CELL_SIZE;
+
+        // Inline helper — writes a horizontal frontier edge (normal is along Y axis)
+        // ny = +ft for south-facing edge, -ft for north-facing edge
+        const auto write_h_edge = [&](float x0, float y, float x1, float ny_sign) -> bool {
+            FogGeometry::GameVertex* v = fog_geo.Alloc(6);
+            if (!v) return false;
+            const float oy = ny_sign * ft;
+            v[0] = {x0, y - oy, 0.f, FRONTIER_COLOR};
+            v[1] = {x0, y + oy, 0.f, FRONTIER_COLOR};
+            v[2] = {x1, y + oy, 0.f, FRONTIER_COLOR};
+            v[3] = {x0, y - oy, 0.f, FRONTIER_COLOR};
+            v[4] = {x1, y + oy, 0.f, FRONTIER_COLOR};
+            v[5] = {x1, y - oy, 0.f, FRONTIER_COLOR};
+            return true;
+        };
+
+        // Inline helper — writes a vertical frontier edge (normal is along X axis)
+        const auto write_v_edge = [&](float x, float y0, float y1, float nx_sign) -> bool {
+            FogGeometry::GameVertex* v = fog_geo.Alloc(6);
+            if (!v) return false;
+            const float ox = nx_sign * ft;
+            v[0] = {x - ox, y0, 0.f, FRONTIER_COLOR};
+            v[1] = {x + ox, y0, 0.f, FRONTIER_COLOR};
+            v[2] = {x + ox, y1, 0.f, FRONTIER_COLOR};
+            v[3] = {x - ox, y0, 0.f, FRONTIER_COLOR};
+            v[4] = {x + ox, y1, 0.f, FRONTIER_COLOR};
+            v[5] = {x - ox, y1, 0.f, FRONTIER_COLOR};
+            return true;
+        };
+
+        for (int gy = 0; gy < cached_grid_h; gy++) {
+            const float y0 = grid_origin_y + gy * BORDER_CELL_SIZE;
+            const float y1 = y0 + BORDER_CELL_SIZE;
+            const int row_base = gy * cached_grid_w;
+
+            for (int gx = 0; gx < cached_grid_w; gx++) {
+                const int idx = row_base + gx;
+                if (!cached_walkable_grid[idx]) continue;
+                if (explored_cells[idx]) continue;
+
+                const float x0 = grid_origin_x + gx * BORDER_CELL_SIZE;
+                const float x1 = x0 + BORDER_CELL_SIZE;
+
+                // Unexplored fog quad
+                FogGeometry::GameVertex* v = fog_geo.Alloc(6);
+                if (!v) return;
+                v[0] = {x0, y0, 0.f, FOG_UNEXPLORED};
+                v[1] = {x1, y0, 0.f, FOG_UNEXPLORED};
+                v[2] = {x1, y1, 0.f, FOG_UNEXPLORED};
+                v[3] = {x0, y0, 0.f, FOG_UNEXPLORED};
+                v[4] = {x1, y1, 0.f, FOG_UNEXPLORED};
+                v[5] = {x0, y1, 0.f, FOG_UNEXPLORED};
+
+                if (!show_exploration_overlay) continue;
+
+                // North edge (y0, normal faces -Y)
+                if (gy > 0 && IsFrontierEdge(row_base - cached_grid_w + gx))
+                    if (!write_h_edge(x0, y0, x1, -1.f)) return;
+
+                // South edge (y1, normal faces +Y)
+                if (gy < cached_grid_h - 1 && IsFrontierEdge(row_base + cached_grid_w + gx))
+                    if (!write_h_edge(x0, y1, x1, +1.f)) return;
+
+                // West edge (x0, normal faces -X)
+                if (gx > 0 && IsFrontierEdge(row_base + gx - 1))
+                    if (!write_v_edge(x0, y0, y1, -1.f)) return;
+
+                // East edge (x1, normal faces +X)
+                if (gx < cached_grid_w - 1 && IsFrontierEdge(row_base + gx + 1))
+                    if (!write_v_edge(x1, y0, y1, +1.f)) return;
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Draw — builds geometry into VertexBuffers, then submits
     // -----------------------------------------------------------------------
@@ -1168,11 +1279,8 @@ namespace {
                 }
                 border_cached_zoom = mission_map_zoom;
                 BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
+                BuildFogGeometry();
             }
-
-            constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
-
-            vb.fog_start = vb.game_arena_pos;
 
             // Compass range circle
             {
@@ -1198,33 +1306,18 @@ namespace {
                 }
             }
 
-            // Unexplored walkable cells + frontier edges
-            constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
-            constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
-            const float frontier_game = FRONTIER_HALF_THICKNESS * cached_px_to_game;
+            // Fog overlay + frontier — rebuilt only when player cell changes
+            {
+                const auto player = GW::Agents::GetControlledCharacter();
+                if (player) {
+                    const int player_cx = static_cast<int>(floorf(player->pos.x / BORDER_CELL_SIZE));
+                    const int player_cy = static_cast<int>(floorf(player->pos.y / BORDER_CELL_SIZE));
 
-            // Base game coord of the grid origin — add cell offsets to avoid repeated multiply
-            const float grid_origin_x = cached_grid_x0 * BORDER_CELL_SIZE;
-            const float grid_origin_y = cached_grid_y0 * BORDER_CELL_SIZE;
-
-            for (int gy = 0; gy < cached_grid_h; gy++) {
-                const float y0 = grid_origin_y + gy * BORDER_CELL_SIZE;
-                const float y1 = y0 + BORDER_CELL_SIZE;
-                const int row_base = gy * cached_grid_w;
-
-                for (int gx = 0; gx < cached_grid_w; gx++) {
-                    if (!cached_walkable_grid[row_base + gx]) continue;
-                    if (explored_cells && explored_cells[row_base + gx]) continue;
-
-                    const float x0 = grid_origin_x + gx * BORDER_CELL_SIZE;
-                    const float x1 = x0 + BORDER_CELL_SIZE;
-
-                    EnqueueGameQuad(vb, vb.fog_count, x0, y0, x1, y1, FOG_UNEXPLORED);
-
-                    if (gy > 0 && IsFrontierEdge(row_base - cached_grid_w + gx)) EnqueueThickLineGame(vb, vb.fog_count, x0, y0, x1, y0, frontier_game, FRONTIER_COLOR);                 // North
-                    if (gy < cached_grid_h - 1 && IsFrontierEdge(row_base + cached_grid_w + gx)) EnqueueThickLineGame(vb, vb.fog_count, x0, y1, x1, y1, frontier_game, FRONTIER_COLOR); // South
-                    if (gx > 0 && IsFrontierEdge(row_base + gx - 1)) EnqueueThickLineGame(vb, vb.fog_count, x0, y0, x0, y1, frontier_game, FRONTIER_COLOR);                             // West
-                    if (gx < cached_grid_w - 1 && IsFrontierEdge(row_base + gx + 1)) EnqueueThickLineGame(vb, vb.fog_count, x1, y0, x1, y1, frontier_game, FRONTIER_COLOR);             // East
+                    if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
+                        last_fog_player_cx = player_cx;
+                        last_fog_player_cy = player_cy;
+                        BuildFogGeometry();
+                    }
                 }
             }
         }
