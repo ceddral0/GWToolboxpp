@@ -418,9 +418,11 @@ namespace ImGui {
 
     bool ColorButtonPicker(const char* label, Color* imcol, const ImGuiColorEditFlags flags)
     {
-        return Colors::DrawSettingHueWheel(label, imcol,
-                                           flags | ImGuiColorEditFlags_AlphaPreview | ImGuiColorEditFlags_NoLabel |
-                                           ImGuiColorEditFlags_NoInputs);
+        auto swatch = Colors::DrawSettingHueWheel(label, imcol, flags | ImGuiColorEditFlags_AlphaPreview | ImGuiColorEditFlags_NoLabel | ImGuiColorEditFlags_NoInputs);
+        if (ImGui::IsItemHovered() && label && *label) {
+            ImGui::SetTooltip(label);
+        }
+        return swatch;
     }
 
     bool MyCombo(const char* label, const char* preview_text, int* current_item, bool (*items_getter)(void*, int, const char**),
