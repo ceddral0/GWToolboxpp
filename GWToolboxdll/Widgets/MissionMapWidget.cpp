@@ -19,9 +19,17 @@
 namespace {
     bool draw_all_terrain_lines = false;
     bool draw_all_minimap_lines = true;
-    bool show_enemy_markers = true;
-    bool show_exploration_overlay = true;
     bool show_vq_overlay = false; // master toggle for all VQ features on mission map
+
+    // VQ overlay colours — configurable via settings
+    Color vq_color_inaccessible = IM_COL32(0, 0, 0, 190);
+    Color vq_color_fog_unexplored = IM_COL32(0, 0, 0, 140);
+    Color vq_color_border = IM_COL32(200, 220, 255, 160);
+    Color vq_color_frontier = IM_COL32(255, 200, 50, 200);
+    Color vq_color_compass = IM_COL32(180, 220, 255, 100);
+    Color vq_color_enemy_alive = IM_COL32(70, 130, 255, 255);
+    Color vq_color_enemy_stale = IM_COL32(255, 180, 50, 180);
+    Color vq_color_enemy_outline = IM_COL32(0, 0, 0, 200);
 
     // Enemy tracking for VQ assistance
     enum class EnemyState { Alive, Stale };
@@ -35,7 +43,7 @@ namespace {
     GW::Constants::InstanceType tracked_enemies_instance_type = GW::Constants::InstanceType::Loading;
 
     constexpr float TWO_PI = 6.2831853f;
-    constexpr float COMPASS_RANGE = 5000.0f;
+    constexpr float COMPASS_RANGE = GW::Constants::Range::Compass;
     constexpr float STALE_CHECK_RANGE = COMPASS_RANGE * 0.9f;
 
     // Pixel-to-game-unit scale — converts pixel thickness to game units
@@ -138,7 +146,7 @@ namespace {
 
     bool IsCellExplored(int gx, int gy)
     {
-        if (!show_exploration_overlay || !explored_cells) return false;
+        if (!explored_cells) return false;
         const int idx = GetCellIndex(gx, gy);
         return idx >= 0 && explored_cells[idx];
     }
@@ -224,7 +232,9 @@ namespace {
         cached_px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : BORDER_CELL_SIZE / 600.0f; // fallback if basis not yet built
         const float border_thickness_game = TARGET_THICKNESS_PX * cached_px_to_game;
 
-        constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
+        const DWORD INACCESSIBLE_COLOR = (DWORD)vq_color_inaccessible;
+        const DWORD BORDER_COLOR = (DWORD)vq_color_border;
+
         static_map_geo.inaccessible_start = 0;
 
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
@@ -248,7 +258,6 @@ namespace {
 
     border:
         static_map_geo.border_start = static_map_geo.vert_count;
-        constexpr DWORD BORDER_COLOR = D3DCOLOR_ARGB(160, 200, 220, 255);
 
         for (const auto& seg : cached_border_segments) {
             const float dx = seg.p2.x - seg.p1.x, dy = seg.p2.y - seg.p1.y;
@@ -652,7 +661,7 @@ namespace {
                 return false;
             }
         }
-        if (show_enemy_markers) {
+        if (show_vq_overlay) {
             if (nav_active) {
                 if (ImGui::Button("Stop navigating")) {
                     StopNavigating();
@@ -667,6 +676,7 @@ namespace {
                 }
             }
         }
+
         return true;
     }
 
@@ -793,7 +803,6 @@ namespace {
     {
         if (!show_vq_overlay) return;
         if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) return;
-        if (!show_enemy_markers) return;
 
         int alive_count = 0, stale_count = 0;
         for (const auto& [id, enemy] : tracked_enemies) {
@@ -1090,9 +1099,9 @@ namespace {
         constexpr float MARKER_SIZE = 9.0f;
         constexpr float OUTLINE_SIZE = MARKER_SIZE + 2.0f;
         constexpr float HALO_SIZE = MARKER_SIZE + 8.0f;
-        constexpr DWORD COLOR_OUTLINE = D3DCOLOR_ARGB(200, 0, 0, 0);
-        constexpr DWORD COLOR_ALIVE = D3DCOLOR_ARGB(255, 70, 130, 255);
-        constexpr DWORD COLOR_STALE = D3DCOLOR_ARGB(180, 255, 180, 50);
+        const DWORD COLOR_OUTLINE = (DWORD)vq_color_enemy_outline;
+        const DWORD COLOR_ALIVE = (DWORD)vq_color_enemy_alive;
+        const DWORD COLOR_STALE = (DWORD)vq_color_enemy_stale;
 
         GW::Vec2f screen_pos;
         if (!GamePosToMissionMapScreenPos(enemy.pos, screen_pos)) return 0;
@@ -1117,7 +1126,6 @@ namespace {
     {
         if (!show_vq_overlay) return;
         if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) return;
-        if (!show_enemy_markers) return;
 
         // Stale first (drawn below alive)
         for (const auto& [agent_id, enemy] : tracked_enemies) {
@@ -1132,8 +1140,8 @@ namespace {
     // making the shared edge a frontier border. Caller is responsible for bounds checking.
     bool IsFrontierEdge(int idx)
     {
-        if (!show_exploration_overlay || !explored_cells) return false;
-        return cached_walkable_grid[idx] && explored_cells[idx];
+        if (!explored_cells) return false;
+        return explored_cells[idx];
     }
 
 
@@ -1145,9 +1153,9 @@ namespace {
         fog_geo.vert_count = 0;
 
         if (!explored_cells || !cached_walkable_grid) return;
+        const DWORD FOG_UNEXPLORED = (DWORD)vq_color_fog_unexplored;
+        const DWORD FRONTIER_COLOR = (DWORD)vq_color_frontier;
 
-        constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
-        constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
         constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
         const float ft = FRONTIER_HALF_THICKNESS * cached_px_to_game; // frontier thickness in game units
 
@@ -1206,7 +1214,6 @@ namespace {
                 v[4] = {x1, y1, 0.f, FOG_UNEXPLORED};
                 v[5] = {x0, y1, 0.f, FOG_UNEXPLORED};
 
-                if (!show_exploration_overlay) continue;
 
                 // North edge (y0, normal faces -Y)
                 if (gy > 0 && IsFrontierEdge(row_base - cached_grid_w + gx))
@@ -1287,7 +1294,9 @@ namespace {
                 const auto player = GW::Agents::GetControlledCharacter();
                 if (player) {
                     constexpr int CIRCLE_SEGMENTS = 64;
-                    constexpr DWORD CIRCLE_COLOR = D3DCOLOR_ARGB(100, 180, 220, 255);
+
+                    const DWORD CIRCLE_COLOR = (DWORD)vq_color_compass;
+
                     constexpr float CIRCLE_THICKNESS = 0.5f;
                     const float px = player->pos.x, py = player->pos.y;
                     const float game_thickness = CIRCLE_THICKNESS * cached_px_to_game;
@@ -1366,9 +1375,16 @@ void MissionMapWidget::LoadSettings(ToolboxIni* ini)
     ToolboxWidget::LoadSettings(ini);
     LOAD_BOOL(draw_all_terrain_lines);
     LOAD_BOOL(draw_all_minimap_lines);
-    LOAD_BOOL(show_enemy_markers);
-    LOAD_BOOL(show_exploration_overlay);
     LOAD_BOOL(show_vq_overlay);
+
+    LOAD_COLOR(vq_color_inaccessible);
+    LOAD_COLOR(vq_color_fog_unexplored);
+    LOAD_COLOR(vq_color_border);
+    LOAD_COLOR(vq_color_frontier);
+    LOAD_COLOR(vq_color_compass);
+    LOAD_COLOR(vq_color_enemy_alive);
+    LOAD_COLOR(vq_color_enemy_stale);
+    LOAD_COLOR(vq_color_enemy_outline);
 }
 
 void MissionMapWidget::SaveSettings(ToolboxIni* ini)
@@ -1376,9 +1392,16 @@ void MissionMapWidget::SaveSettings(ToolboxIni* ini)
     ToolboxWidget::SaveSettings(ini);
     SAVE_BOOL(draw_all_terrain_lines);
     SAVE_BOOL(draw_all_minimap_lines);
-    SAVE_BOOL(show_enemy_markers);
-    SAVE_BOOL(show_exploration_overlay);
     SAVE_BOOL(show_vq_overlay);
+
+    SAVE_COLOR(vq_color_inaccessible);
+    SAVE_COLOR(vq_color_fog_unexplored);
+    SAVE_COLOR(vq_color_border);
+    SAVE_COLOR(vq_color_frontier);
+    SAVE_COLOR(vq_color_compass);
+    SAVE_COLOR(vq_color_enemy_alive);
+    SAVE_COLOR(vq_color_enemy_stale);
+    SAVE_COLOR(vq_color_enemy_outline);
 }
 
 void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
@@ -1404,10 +1427,37 @@ void MissionMapWidget::DrawSettingsInternal()
 {
     ImGui::Checkbox("Draw all terrain lines", &draw_all_terrain_lines);
     ImGui::Checkbox("Draw all minimap lines", &draw_all_minimap_lines);
-    ImGui::Checkbox("Show enemy markers on mission map", &show_enemy_markers);
-    ImGui::ShowHelp("Tracks enemy positions as they enter compass range.\nBlue = alive, Orange = last known (moved away).\nArrows on orange markers show last movement direction.");
-    ImGui::Checkbox("Show exploration overlay on mission map", &show_exploration_overlay);
-    ImGui::ShowHelp("Highlights areas you've explored during this session on the mission map.");
+    ImGui::Checkbox("Vanquish Overlay", &show_vq_overlay);
+    ImGui::ShowHelp("Tracks enemy positions as they enter compass range.\nBlue = alive, Orange = last known (moved away).\nArrows on orange markers show last movement direction.\nAlso highlights areas you've explored during this session on the mission map.");
+
+    if (show_vq_overlay) {
+        ImGui::Separator();
+        ImGui::Text("Vanquish Overlay Colours");
+        ImGui::Indent();
+        // Flag that triggers a static geometry rebuild if colour changes
+        bool static_changed = false;
+        bool fog_changed = false;
+
+        static_changed |= ImGui::ColorButtonPicker("Inaccessible area", &vq_color_inaccessible, 0);
+        ImGui::SameLine();
+        static_changed |= ImGui::ColorButtonPicker("Map border", &vq_color_border, 0);
+        ImGui::SameLine();
+        fog_changed |= ImGui::ColorButtonPicker("Unexplored fog", &vq_color_fog_unexplored, 0);
+        ImGui::SameLine();
+        fog_changed |= ImGui::ColorButtonPicker("Frontier edge", &vq_color_frontier, 0);
+        ImGui::SameLine();
+        ImGui::ColorButtonPicker("Compass range", &vq_color_compass, 0);
+        ImGui::SameLine();
+        ImGui::ColorButtonPicker("Enemy (alive)", &vq_color_enemy_alive, 0);
+        ImGui::SameLine();
+        ImGui::ColorButtonPicker("Enemy (stale)", &vq_color_enemy_stale, 0);
+        ImGui::SameLine();
+        ImGui::ColorButtonPicker("Enemy outline", &vq_color_enemy_outline, 0);
+        ImGui::Unindent();
+
+        if (static_changed) BuildStaticMapGeometry();
+        if (fog_changed) BuildFogGeometry();
+    }
 }
 
 bool MissionMapWidget::WndProc(const UINT Message, WPARAM, LPARAM lParam)
