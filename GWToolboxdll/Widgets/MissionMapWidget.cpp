@@ -40,46 +40,11 @@ namespace {
 
     // Exploration tracking (fog of war)
     constexpr float EXPLORE_CELL_SIZE = 250.0f;
-    std::unordered_set<uint64_t> explored_cells;
+    bool* explored_cells = nullptr; // parallel to cached_walkable_grid, same dimensions
     GW::Constants::MapID explored_map_id = static_cast<GW::Constants::MapID>(0);
     GW::Constants::InstanceType explored_instance_type = GW::Constants::InstanceType::Loading;
 
-    uint64_t CellKey(int cx, int cy)
-    {
-        return (static_cast<uint64_t>(static_cast<uint32_t>(cx)) << 32) | static_cast<uint32_t>(cy);
-    }
-
-    void UpdateExploration(const GW::GamePos& player_pos)
-    {
-        const auto map_id = GW::Map::GetMapID();
-        const auto instance_type = GW::Map::GetInstanceType();
-        if (map_id != explored_map_id || instance_type != explored_instance_type) {
-            explored_cells.clear();
-            explored_map_id = map_id;
-            explored_instance_type = instance_type;
-        }
-
-        if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) return;
-
-        const int range_cells = static_cast<int>(COMPASS_RANGE / EXPLORE_CELL_SIZE) + 1;
-        const int player_cx = static_cast<int>(floorf(player_pos.x / EXPLORE_CELL_SIZE));
-        const int player_cy = static_cast<int>(floorf(player_pos.y / EXPLORE_CELL_SIZE));
-        const float range_sq = COMPASS_RANGE * COMPASS_RANGE;
-
-        for (int dx = -range_cells; dx <= range_cells; dx++) {
-            for (int dy = -range_cells; dy <= range_cells; dy++) {
-                const float cell_center_x = (player_cx + dx + 0.5f) * EXPLORE_CELL_SIZE;
-                const float cell_center_y = (player_cy + dy + 0.5f) * EXPLORE_CELL_SIZE;
-                const float ddx = cell_center_x - player_pos.x;
-                const float ddy = cell_center_y - player_pos.y;
-                if (ddx * ddx + ddy * ddy <= range_sq) {
-                    explored_cells.insert(CellKey(player_cx + dx, player_cy + dy));
-                }
-            }
-        }
-    }
-
-    struct BorderSegment {
+        struct BorderSegment {
         GW::GamePos p1, p2;
     };
 
@@ -92,41 +57,100 @@ namespace {
     GW::Constants::MapID border_map_id = static_cast<GW::Constants::MapID>(0);
     constexpr float BORDER_CELL_SIZE = 300.0f;
 
-    bool IsGridCellWalkable(int cx, int cy)
+
+    // Returns the flat index into cached_walkable_grid / explored_cells for
+    // a given absolute grid coord, or -1 if out of bounds.
+    int GetCellIndex(int gx, int gy)
     {
-        cx -= cached_grid_x0;
-        cy -= cached_grid_y0;
-        if (cx < 0 || cx >= cached_grid_w || cy < 0 || cy >= cached_grid_h) return false;
-        return cached_walkable_grid[cy * cached_grid_w + cx];
+        const int lx = gx - cached_grid_x0;
+        const int ly = gy - cached_grid_y0;
+        if (lx < 0 || lx >= cached_grid_w || ly < 0 || ly >= cached_grid_h) return -1;
+        return ly * cached_grid_w + lx;
     }
 
-    bool CellOverlapsTrapezoid(float cx0, float cy0, float cx1, float cy1, const GW::PathingTrapezoid& trap)
+    bool IsCellExplored(int gx, int gy)
     {
+        if (!show_exploration_overlay || !explored_cells) return false;
+        const int idx = GetCellIndex(gx, gy);
+        return idx >= 0 && explored_cells[idx];
+    }
+
+    void UpdateExploration(const GW::GamePos& player_pos)
+    {
+        const auto map_id = GW::Map::GetMapID();
+        const auto instance_type = GW::Map::GetInstanceType();
+        if (map_id != explored_map_id || instance_type != explored_instance_type) {
+            delete[] explored_cells;
+            explored_cells = nullptr;
+            explored_map_id = map_id;
+            explored_instance_type = instance_type;
+        }
+
+        if (instance_type != GW::Constants::InstanceType::Explorable) return;
+
+        // Allocate parallel to walkable grid when first entering an explorable area
+        if (!explored_cells && cached_walkable_grid_size > 0) {
+            explored_cells = new bool[cached_walkable_grid_size](); // zero-init
+        }
+        if (!explored_cells) return;
+
+        const int range_cells = static_cast<int>(COMPASS_RANGE / BORDER_CELL_SIZE) + 1;
+        const int player_cx = static_cast<int>(floorf(player_pos.x / BORDER_CELL_SIZE));
+        const int player_cy = static_cast<int>(floorf(player_pos.y / BORDER_CELL_SIZE));
+        const float range_sq = COMPASS_RANGE * COMPASS_RANGE;
+
+        for (int dy = -range_cells; dy <= range_cells; dy++) {
+            for (int dx = -range_cells; dx <= range_cells; dx++) {
+                const int gx = player_cx + dx;
+                const int gy = player_cy + dy;
+                const float cell_center_x = (gx + 0.5f) * BORDER_CELL_SIZE;
+                const float cell_center_y = (gy + 0.5f) * BORDER_CELL_SIZE;
+                const float ddx = cell_center_x - player_pos.x;
+                const float ddy = cell_center_y - player_pos.y;
+                if (ddx * ddx + ddy * ddy > range_sq) continue;
+                const int idx = GetCellIndex(gx, gy);
+                if (idx >= 0) explored_cells[idx] = true;
+            }
+        }
+    }
+
+
+
+    bool IsGridCellWalkable(int gx, int gy)
+    {
+        const int idx = GetCellIndex(gx, gy);
+        return idx >= 0 && cached_walkable_grid[idx];
+    }
+
+    bool IsCellWalkableInTrapezoid(int gx, int gy, const GW::PathingTrapezoid& trap)
+    {
+        const float cx0 = gx * BORDER_CELL_SIZE;
+        const float cy0 = gy * BORDER_CELL_SIZE;
+        const float cx1 = cx0 + BORDER_CELL_SIZE;
+        const float cy1 = cy0 + BORDER_CELL_SIZE;
+
         if (cy1 <= trap.YB || cy0 >= trap.YT) return false;
         const float y_lo = std::max(cy0, trap.YB);
         const float y_hi = std::min(cy1, trap.YT);
         const float height = trap.YT - trap.YB;
-        if (height < 0.001f) {
-            return cx1 > std::min(trap.XBL, trap.XTL) && cx0 < std::max(trap.XBR, trap.XTR);
-        }
-        auto trap_x_range = [&](float y, float& left, float& right) {
-            const float t = (y - trap.YB) / height;
-            left = trap.XBL + t * (trap.XTL - trap.XBL);
-            right = trap.XBR + t * (trap.XTR - trap.XBR);
-        };
-        float l0, r0, l1, r1;
-        trap_x_range(y_lo, l0, r0);
-        trap_x_range(y_hi, l1, r1);
-        return cx1 > std::min(l0, l1) && cx0 < std::max(r0, r1);
+        if (height < 0.001f) return cx1 > std::min(trap.XBL, trap.XTL) && cx0 < std::max(trap.XBR, trap.XTR);
+
+        const float t_lo = (y_lo - trap.YB) / height;
+        const float t_hi = (y_hi - trap.YB) / height;
+        const float left = std::min(trap.XBL + t_lo * (trap.XTL - trap.XBL), trap.XBL + t_hi * (trap.XTL - trap.XBL));
+        const float right = std::max(trap.XBR + t_lo * (trap.XTR - trap.XBR), trap.XBR + t_hi * (trap.XTR - trap.XBR));
+        return cx1 > left && cx0 < right;
     }
 
     void RebuildMapBorder()
     {
         cached_border_segments.clear();
-
         delete[] cached_walkable_grid;
         cached_walkable_grid = nullptr;
         cached_walkable_grid_size = 0;
+        delete[] explored_cells;
+        explored_cells = nullptr;
+        explored_map_id = static_cast<GW::Constants::MapID>(0);
 
         const auto pathing_map = GW::Map::GetPathingMap();
         if (!pathing_map) return;
@@ -148,34 +172,34 @@ namespace {
 
         cached_grid_x0 = static_cast<int>(floorf(min_x / BORDER_CELL_SIZE)) - 1;
         cached_grid_y0 = static_cast<int>(floorf(min_y / BORDER_CELL_SIZE)) - 1;
-        const int grid_x1 = static_cast<int>(ceilf(max_x / BORDER_CELL_SIZE)) + 1;
-        const int grid_y1 = static_cast<int>(ceilf(max_y / BORDER_CELL_SIZE)) + 1;
-        cached_grid_w = grid_x1 - cached_grid_x0;
-        cached_grid_h = grid_y1 - cached_grid_y0;
+        cached_grid_w = static_cast<int>(ceilf(max_x / BORDER_CELL_SIZE)) + 1 - cached_grid_x0;
+        cached_grid_h = static_cast<int>(ceilf(max_y / BORDER_CELL_SIZE)) + 1 - cached_grid_y0;
 
         cached_walkable_grid_size = cached_grid_w * cached_grid_h;
-        cached_walkable_grid = new bool[cached_walkable_grid_size](); // () zero-initialises
+        cached_walkable_grid = new bool[cached_walkable_grid_size]();
 
         for (const auto* trap : traps) {
-            const int ty0 = static_cast<int>(floorf(trap->YB / BORDER_CELL_SIZE)) - cached_grid_y0;
-            const int ty1 = static_cast<int>(ceilf(trap->YT / BORDER_CELL_SIZE)) - cached_grid_y0;
-            const int tx0 = static_cast<int>(floorf(std::min({trap->XTL, trap->XBL}) / BORDER_CELL_SIZE)) - cached_grid_x0;
-            const int tx1 = static_cast<int>(ceilf(std::max({trap->XTR, trap->XBR}) / BORDER_CELL_SIZE)) - cached_grid_x0;
-            for (int cy = std::max(0, ty0); cy <= std::min(cached_grid_h - 1, ty1); cy++) {
-                for (int cx = std::max(0, tx0); cx <= std::min(cached_grid_w - 1, tx1); cx++) {
-                    if (cached_walkable_grid[cy * cached_grid_w + cx]) continue;
-                    const float cell_x0 = (cached_grid_x0 + cx) * BORDER_CELL_SIZE;
-                    const float cell_y0 = (cached_grid_y0 + cy) * BORDER_CELL_SIZE;
-                    if (CellOverlapsTrapezoid(cell_x0, cell_y0, cell_x0 + BORDER_CELL_SIZE, cell_y0 + BORDER_CELL_SIZE, *trap)) {
-                        cached_walkable_grid[cy * cached_grid_w + cx] = true;
-                    }
+            const int ty0 = std::max(0, static_cast<int>(floorf(trap->YB / BORDER_CELL_SIZE)) - cached_grid_y0);
+            const int ty1 = std::min(cached_grid_h - 1, static_cast<int>(ceilf(trap->YT / BORDER_CELL_SIZE)) - cached_grid_y0);
+            const int tx0 = std::max(0, static_cast<int>(floorf(std::min({trap->XTL, trap->XBL}) / BORDER_CELL_SIZE)) - cached_grid_x0);
+            const int tx1 = std::min(cached_grid_w - 1, static_cast<int>(ceilf(std::max({trap->XTR, trap->XBR}) / BORDER_CELL_SIZE)) - cached_grid_x0);
+            for (int cy = ty0; cy <= ty1; cy++) {
+                for (int cx = tx0; cx <= tx1; cx++) {
+                    const int abs_gx = cached_grid_x0 + cx;
+                    const int abs_gy = cached_grid_y0 + cy;
+                    const int idx = GetCellIndex(abs_gx, abs_gy);
+                    if (idx < 0 || cached_walkable_grid[idx]) continue;
+                    if (IsCellWalkableInTrapezoid(abs_gx, abs_gy, *trap)) 
+                        cached_walkable_grid[idx] = true;
                 }
             }
         }
 
         for (int cy = 0; cy < cached_grid_h; cy++) {
             for (int cx = 0; cx < cached_grid_w; cx++) {
-                if (!cached_walkable_grid[cy * cached_grid_w + cx]) continue;
+                const int idx = GetCellIndex(cached_grid_x0 + cx, cached_grid_y0 + cy);
+                if (idx < 0 || !cached_walkable_grid[idx]) continue;
+
                 const float x0 = (cached_grid_x0 + cx) * BORDER_CELL_SIZE;
                 const float y0 = (cached_grid_y0 + cy) * BORDER_CELL_SIZE;
                 const float x1 = x0 + BORDER_CELL_SIZE;
@@ -812,15 +836,6 @@ namespace {
                 constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
                 constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
 
-                auto is_cell_explored = [&](int gx, int gy) -> bool {
-                    if (!show_exploration_overlay) return false;
-                    const float cx = (gx + 0.5f) * BORDER_CELL_SIZE;
-                    const float cy = (gy + 0.5f) * BORDER_CELL_SIZE;
-                    const int ecx = static_cast<int>(floorf(cx / EXPLORE_CELL_SIZE));
-                    const int ecy = static_cast<int>(floorf(cy / EXPLORE_CELL_SIZE));
-                    return explored_cells.contains(CellKey(ecx, ecy));
-                };
-
                 for (int gy = clamp_gy0 - cached_grid_y0; gy <= clamp_gy1 - cached_grid_y0; gy++) {
                     if (gy < 0 || gy >= cached_grid_h) continue;
                     for (int gx = clamp_gx0 - cached_grid_x0; gx <= clamp_gx1 - cached_grid_x0; gx++) {
@@ -828,7 +843,7 @@ namespace {
                         if (!cached_walkable_grid[gy * cached_grid_w + gx]) continue;
                         const int abs_gx = cached_grid_x0 + gx;
                         const int abs_gy = cached_grid_y0 + gy;
-                        if (is_cell_explored(abs_gx, abs_gy)) continue;
+                        if (IsCellExplored(abs_gx, abs_gy)) continue;
 
                         const float x0 = abs_gx * BORDER_CELL_SIZE;
                         const float y0 = abs_gy * BORDER_CELL_SIZE;
@@ -839,7 +854,7 @@ namespace {
 
                         auto check_neighbor = [&](int nx, int ny, float ex0, float ey0, float ex1, float ey1) {
                             if (!IsGridCellWalkable(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
-                            if (!is_cell_explored(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
+                            if (!IsCellExplored(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
                             push_thick_line_game(fog_count, ex0, ey0, ex1, ey1, FRONTIER_HALF_THICKNESS, FRONTIER_COLOR);
                         };
                         check_neighbor(gx, gy - 1, x0, y0, x1, y0); // North
@@ -1151,4 +1166,6 @@ void MissionMapWidget::Terminate()
     OnMissionMap_UICallback_Func = nullptr;
     delete[] cached_walkable_grid;
     cached_walkable_grid = nullptr;
+    delete[] explored_cells;
+    explored_cells = nullptr;
 }
