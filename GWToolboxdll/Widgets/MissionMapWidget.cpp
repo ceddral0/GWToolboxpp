@@ -200,6 +200,20 @@ namespace {
     std::vector<Polyline> cached_frontier_polylines;
     size_t fog_cache_explored_count = SIZE_MAX;
 
+    // Game-space vertex for GPU-projected geometry (D3DFVF_XYZ | D3DFVF_DIFFUSE)
+    struct GameVertex { float x, y, z; DWORD color; };
+    std::vector<GameVertex> cached_inaccessible_verts;
+    std::vector<GameVertex> cached_unexplored_verts;
+
+    void PushGameQuad(std::vector<GameVertex>& out, float x0, float y0, float x1, float y1, DWORD color) {
+        out.push_back({x0, y0, 0, color});
+        out.push_back({x1, y0, 0, color});
+        out.push_back({x1, y1, 0, color});
+        out.push_back({x0, y0, 0, color});
+        out.push_back({x1, y1, 0, color});
+        out.push_back({x0, y1, 0, color});
+    }
+
     bool IsGridCellWalkable(int gx, int gy)
     {
         const int idx = GetCellIndex(gx, gy);
@@ -218,7 +232,10 @@ namespace {
 
     void RebuildFogCache() {
         fog_cache_explored_count = CountExploredCells();
+        cached_unexplored_verts.clear();
         std::vector<std::pair<GW::GamePos, GW::GamePos>> frontier_segments;
+
+        constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
 
         for (int gy = 0; gy < cached_grid_h; gy++) {
             for (int gx = 0; gx < cached_grid_w; gx++) {
@@ -230,6 +247,8 @@ namespace {
 
                 const float x0 = abs_gx * BORDER_CELL_SIZE;
                 const float y0 = abs_gy * BORDER_CELL_SIZE;
+                PushGameQuad(cached_unexplored_verts, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, FOG_UNEXPLORED);
+
                 const float x1 = x0 + BORDER_CELL_SIZE;
                 const float y1 = y0 + BORDER_CELL_SIZE;
                 auto check_neighbor = [&](int nx, int ny, const GW::GamePos& ep1, const GW::GamePos& ep2) {
@@ -273,6 +292,7 @@ namespace {
     void RebuildMapBorder()
     {
         cached_border_polylines.clear();
+        cached_inaccessible_verts.clear();
         fog_cache_explored_count = SIZE_MAX;
         delete[] cached_walkable_grid;
         cached_walkable_grid = nullptr;
@@ -320,6 +340,33 @@ namespace {
                     if (idx < 0 || cached_walkable_grid[idx]) continue;
                     if (IsCellWalkableInTrapezoid(abs_gx, abs_gy, *trap)) 
                         cached_walkable_grid[idx] = true;
+                }
+            }
+        }
+
+        // Build inaccessible cell vertex buffer in game coordinates
+        {
+            constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
+
+            // 4 large strips covering everything outside the grid (scissor rect clips to viewport)
+            constexpr float INF = 1e6f;
+            const float gx0 = cached_grid_x0 * BORDER_CELL_SIZE;
+            const float gy0 = cached_grid_y0 * BORDER_CELL_SIZE;
+            const float gx1 = (cached_grid_x0 + cached_grid_w) * BORDER_CELL_SIZE;
+            const float gy1 = (cached_grid_y0 + cached_grid_h) * BORDER_CELL_SIZE;
+            PushGameQuad(cached_inaccessible_verts, -INF, -INF, INF, gy0, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, -INF, gy1, INF, INF, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, -INF, gy0, gx0, gy1, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx1, gy0, INF, gy1, INACCESSIBLE_COLOR);
+
+            // Non-walkable cells within the grid
+            for (int cy = 0; cy < cached_grid_h; cy++) {
+                for (int cx = 0; cx < cached_grid_w; cx++) {
+                    const int idx = GetCellIndex(cached_grid_x0 + cx, cached_grid_y0 + cy);
+                    if (idx < 0 || cached_walkable_grid[idx]) continue;
+                    const float x0 = (cached_grid_x0 + cx) * BORDER_CELL_SIZE;
+                    const float y0 = (cached_grid_y0 + cy) * BORDER_CELL_SIZE;
+                    PushGameQuad(cached_inaccessible_verts, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, INACCESSIBLE_COLOR);
                 }
             }
         }
@@ -913,9 +960,6 @@ namespace {
                 RebuildFogCache();
             }
 
-            constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
-            constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
-
             // Compute visible game-coord range for culling
             GW::GamePos viewport_tl_game, viewport_br_game;
             const GW::Vec2f wm_tl = ScreenPosToMissionMapCoords(mission_map_top_left);
@@ -932,27 +976,7 @@ namespace {
                 constexpr float MAX_VALID_COORD = 1e6f;
                 if (fabsf(vis_min_x) > MAX_VALID_COORD || fabsf(vis_min_y) > MAX_VALID_COORD || fabsf(vis_max_x) > MAX_VALID_COORD || fabsf(vis_max_y) > MAX_VALID_COORD) goto draw;
 
-                const int vis_gx0 = static_cast<int>(floorf(vis_min_x / BORDER_CELL_SIZE)) - 1;
-                const int vis_gy0 = static_cast<int>(floorf(vis_min_y / BORDER_CELL_SIZE)) - 1;
-                const int vis_gx1 = static_cast<int>(ceilf(vis_max_x / BORDER_CELL_SIZE)) + 1;
-                const int vis_gy1 = static_cast<int>(ceilf(vis_max_y / BORDER_CELL_SIZE)) + 1;
-
-                const int clamp_gx0 = std::max(vis_gx0, cached_grid_x0);
-                const int clamp_gy0 = std::max(vis_gy0, cached_grid_y0);
-                const int clamp_gx1 = std::min(vis_gx1, cached_grid_x0 + cached_grid_w - 1);
-                const int clamp_gy1 = std::min(vis_gy1, cached_grid_y0 + cached_grid_h - 1);
-
                 fog_start = arena_pos;
-
-                // Inaccessible (non-walkable) cells
-                for (int gy = clamp_gy0; gy <= clamp_gy1; gy++) {
-                    for (int gx = clamp_gx0; gx <= clamp_gx1; gx++) {
-                        if (IsGridCellWalkable(gx, gy)) continue;
-                        const float x0 = gx * BORDER_CELL_SIZE;
-                        const float y0 = gy * BORDER_CELL_SIZE;
-                        push_game_quad(fog_count, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, INACCESSIBLE_COLOR);
-                    }
-                }
 
                 // Compass range circle
                 {
@@ -967,22 +991,6 @@ namespace {
                             const float a2 = static_cast<float>(i + 1) / CIRCLE_SEGMENTS * TWO_PI;
                             push_thick_line_game(fog_count, px + COMPASS_RANGE * cosf(a1), py + COMPASS_RANGE * sinf(a1), px + COMPASS_RANGE * cosf(a2), py + COMPASS_RANGE * sinf(a2), CIRCLE_THICKNESS, CIRCLE_COLOR);
                         }
-                    }
-                }
-
-                // Unexplored walkable cells
-                for (int gy = clamp_gy0 - cached_grid_y0; gy <= clamp_gy1 - cached_grid_y0; gy++) {
-                    if (gy < 0 || gy >= cached_grid_h) continue;
-                    for (int gx = clamp_gx0 - cached_grid_x0; gx <= clamp_gx1 - cached_grid_x0; gx++) {
-                        if (gx < 0 || gx >= cached_grid_w) continue;
-                        if (!cached_walkable_grid[gy * cached_grid_w + gx]) continue;
-                        const int abs_gx = cached_grid_x0 + gx;
-                        const int abs_gy = cached_grid_y0 + gy;
-                        if (IsCellExplored(abs_gx, abs_gy)) continue;
-
-                        const float x0 = abs_gx * BORDER_CELL_SIZE;
-                        const float y0 = abs_gy * BORDER_CELL_SIZE;
-                        push_game_quad(fog_count, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, FOG_UNEXPLORED);
                     }
                 }
 
@@ -1149,7 +1157,8 @@ namespace {
         }
 
     draw:
-        if (!fog_count && !border_count && !line_count && !enemy_count) return;
+        const bool has_fog_quads = !cached_inaccessible_verts.empty() || !cached_unexplored_verts.empty();
+        if (!fog_count && !border_count && !line_count && !enemy_count && !has_fog_quads) return;
 
         // -----------------------------------------------------------------------
         // Render state setup
@@ -1177,8 +1186,43 @@ namespace {
         dx_device->SetScissorRect(&scissorRect);
 
         // -----------------------------------------------------------------------
+        // Draw GPU-projected fog quads (cached in game coordinates)
+        // -----------------------------------------------------------------------
+        if (has_fog_quads) {
+            D3DMATRIX game_to_screen;
+            if (BuildGameToScreenWorldMatrix(game_to_screen)) {
+                D3DMATRIX saved_world, saved_view, saved_proj;
+                dx_device->GetTransform(D3DTS_WORLD, &saved_world);
+                dx_device->GetTransform(D3DTS_VIEW, &saved_view);
+                dx_device->GetTransform(D3DTS_PROJECTION, &saved_proj);
+
+                D3DVIEWPORT9 vp;
+                dx_device->GetViewport(&vp);
+                const auto ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
+
+                dx_device->SetTransform(D3DTS_WORLD, &game_to_screen);
+                dx_device->SetTransform(D3DTS_VIEW, &IDENTITY_MATRIX);
+                dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
+
+                dx_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE);
+                dx_device->SetRenderState(D3DRS_ZENABLE, FALSE);
+                dx_device->SetRenderState(D3DRS_LIGHTING, FALSE);
+
+                if (!cached_inaccessible_verts.empty())
+                    dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, cached_inaccessible_verts.size() / 3, cached_inaccessible_verts.data(), sizeof(GameVertex));
+                if (!cached_unexplored_verts.empty())
+                    dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, cached_unexplored_verts.size() / 3, cached_unexplored_verts.data(), sizeof(GameVertex));
+
+                dx_device->SetTransform(D3DTS_WORLD, &saved_world);
+                dx_device->SetTransform(D3DTS_VIEW, &saved_view);
+                dx_device->SetTransform(D3DTS_PROJECTION, &saved_proj);
+            }
+        }
+
+        // -----------------------------------------------------------------------
         // Draw — all from one contiguous static array, no heap involvement
         // -----------------------------------------------------------------------
+        dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         if (fog_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_count / 3, vertex_arena + fog_start, sizeof(Vertex));
         if (border_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, border_count / 3, vertex_arena + border_start, sizeof(Vertex));
         if (line_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, line_count / 3, vertex_arena + line_start, sizeof(Vertex));
