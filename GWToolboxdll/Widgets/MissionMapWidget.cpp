@@ -44,11 +44,12 @@ namespace {
     GW::Constants::MapID explored_map_id = static_cast<GW::Constants::MapID>(0);
     GW::Constants::InstanceType explored_instance_type = GW::Constants::InstanceType::Loading;
 
-        struct BorderSegment {
-        GW::GamePos p1, p2;
+    struct Polyline {
+        std::vector<GW::GamePos> points;
+        bool closed = false;
     };
 
-    std::vector<BorderSegment> cached_border_segments;
+    std::vector<Polyline> cached_border_polylines;
 
     bool* cached_walkable_grid = nullptr;
     int cached_walkable_grid_size = 0;
@@ -116,10 +117,156 @@ namespace {
 
 
 
+    // Polyline smoothing utilities
+    struct PosKey {
+        int x, y;
+        bool operator==(const PosKey& o) const { return x == o.x && y == o.y; }
+    };
+    struct PosKeyHash {
+        size_t operator()(const PosKey& k) const {
+            return std::hash<int>()(k.x) ^ (std::hash<int>()(k.y) << 16);
+        }
+    };
+
+    PosKey ToPosKey(const GW::GamePos& p) {
+        return {static_cast<int>(roundf(p.x)), static_cast<int>(roundf(p.y))};
+    }
+
+    // Chain disconnected segments into polylines by matching endpoints
+    std::vector<Polyline> ChainSegments(const std::vector<std::pair<GW::GamePos, GW::GamePos>>& segments) {
+        std::unordered_multimap<PosKey, std::pair<size_t, PosKey>, PosKeyHash> adj;
+        for (size_t i = 0; i < segments.size(); i++) {
+            auto k1 = ToPosKey(segments[i].first);
+            auto k2 = ToPosKey(segments[i].second);
+            adj.emplace(k1, std::make_pair(i, k2));
+            adj.emplace(k2, std::make_pair(i, k1));
+        }
+
+        std::vector<bool> visited(segments.size(), false);
+        std::vector<Polyline> result;
+
+        for (size_t start = 0; start < segments.size(); start++) {
+            if (visited[start]) continue;
+            visited[start] = true;
+
+            Polyline poly;
+            poly.points.push_back(segments[start].first);
+            poly.points.push_back(segments[start].second);
+
+            for (auto current = ToPosKey(segments[start].second);;) {
+                bool found = false;
+                auto [it, end] = adj.equal_range(current);
+                for (; it != end; ++it) {
+                    if (visited[it->second.first]) continue;
+                    visited[it->second.first] = true;
+                    current = it->second.second;
+                    const auto& seg = segments[it->second.first];
+                    poly.points.push_back(ToPosKey(seg.first) == current ? seg.first : seg.second);
+                    found = true;
+                    break;
+                }
+                if (!found) break;
+            }
+
+            if (ToPosKey(poly.points.front()) == ToPosKey(poly.points.back())) {
+                poly.closed = true;
+                poly.points.pop_back();
+            }
+            result.push_back(std::move(poly));
+        }
+        return result;
+    }
+
+    // Chaikin corner-cutting subdivision
+    void SmoothPolyline(Polyline& poly, int iterations) {
+        for (int iter = 0; iter < iterations; iter++) {
+            const int n = static_cast<int>(poly.points.size());
+            if (n < 2) return;
+            std::vector<GW::GamePos> smoothed;
+
+            const int count = poly.closed ? n : n - 1;
+            if (!poly.closed) smoothed.push_back(poly.points[0]);
+            for (int i = 0; i < count; i++) {
+                const auto& p0 = poly.points[i];
+                const auto& p1 = poly.points[(i + 1) % n];
+                smoothed.push_back({0.75f * p0.x + 0.25f * p1.x, 0.75f * p0.y + 0.25f * p1.y, 0});
+                smoothed.push_back({0.25f * p0.x + 0.75f * p1.x, 0.25f * p0.y + 0.75f * p1.y, 0});
+            }
+            if (!poly.closed) smoothed.push_back(poly.points.back());
+            poly.points = std::move(smoothed);
+        }
+    }
+
+    std::vector<Polyline> cached_frontier_polylines;
+    size_t fog_cache_explored_count = SIZE_MAX;
+
+    // Game-space vertex for GPU-projected geometry (D3DFVF_XYZ | D3DFVF_DIFFUSE)
+    struct GameVertex { float x, y, z; DWORD color; };
+    std::vector<GameVertex> cached_inaccessible_verts;
+    std::vector<GameVertex> cached_unexplored_verts;
+
+    void PushGameQuad(std::vector<GameVertex>& out, float x0, float y0, float x1, float y1, DWORD color) {
+        out.push_back({x0, y0, 0, color});
+        out.push_back({x1, y0, 0, color});
+        out.push_back({x1, y1, 0, color});
+        out.push_back({x0, y0, 0, color});
+        out.push_back({x1, y1, 0, color});
+        out.push_back({x0, y1, 0, color});
+    }
+
     bool IsGridCellWalkable(int gx, int gy)
     {
         const int idx = GetCellIndex(gx, gy);
         return idx >= 0 && cached_walkable_grid[idx];
+    }
+
+    size_t CountExploredCells() {
+        size_t count = 0;
+        if (explored_cells) {
+            for (int i = 0; i < cached_walkable_grid_size; i++) {
+                if (explored_cells[i]) count++;
+            }
+        }
+        return count;
+    }
+
+    void RebuildFogCache() {
+        fog_cache_explored_count = CountExploredCells();
+        cached_unexplored_verts.clear();
+        std::vector<std::pair<GW::GamePos, GW::GamePos>> frontier_segments;
+
+        constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
+
+        for (int gy = 0; gy < cached_grid_h; gy++) {
+            for (int gx = 0; gx < cached_grid_w; gx++) {
+                const int abs_gx = cached_grid_x0 + gx;
+                const int abs_gy = cached_grid_y0 + gy;
+                const int idx = GetCellIndex(abs_gx, abs_gy);
+                if (idx < 0 || !cached_walkable_grid[idx]) continue;
+                if (IsCellExplored(abs_gx, abs_gy)) continue;
+
+                const float x0 = abs_gx * BORDER_CELL_SIZE;
+                const float y0 = abs_gy * BORDER_CELL_SIZE;
+                PushGameQuad(cached_unexplored_verts, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, FOG_UNEXPLORED);
+
+                const float x1 = x0 + BORDER_CELL_SIZE;
+                const float y1 = y0 + BORDER_CELL_SIZE;
+                auto check_neighbor = [&](int nx, int ny, const GW::GamePos& ep1, const GW::GamePos& ep2) {
+                    if (!IsGridCellWalkable(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
+                    if (!IsCellExplored(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
+                    frontier_segments.push_back({ep1, ep2});
+                };
+                check_neighbor(gx, gy - 1, {x0, y0, 0}, {x1, y0, 0});
+                check_neighbor(gx, gy + 1, {x0, y1, 0}, {x1, y1, 0});
+                check_neighbor(gx - 1, gy, {x0, y0, 0}, {x0, y1, 0});
+                check_neighbor(gx + 1, gy, {x1, y0, 0}, {x1, y1, 0});
+            }
+        }
+
+        cached_frontier_polylines = ChainSegments(frontier_segments);
+        for (auto& poly : cached_frontier_polylines) {
+            SmoothPolyline(poly, 2);
+        }
     }
 
     bool IsCellWalkableInTrapezoid(int gx, int gy, const GW::PathingTrapezoid& trap)
@@ -144,7 +291,9 @@ namespace {
 
     void RebuildMapBorder()
     {
-        cached_border_segments.clear();
+        cached_border_polylines.clear();
+        cached_inaccessible_verts.clear();
+        fog_cache_explored_count = SIZE_MAX;
         delete[] cached_walkable_grid;
         cached_walkable_grid = nullptr;
         cached_walkable_grid_size = 0;
@@ -195,6 +344,34 @@ namespace {
             }
         }
 
+        // Build inaccessible cell vertex buffer in game coordinates
+        {
+            constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
+
+            // 4 strips covering everything outside the grid (scissor rect clips to viewport)
+            const float gx0 = cached_grid_x0 * BORDER_CELL_SIZE;
+            const float gy0 = cached_grid_y0 * BORDER_CELL_SIZE;
+            const float gx1 = (cached_grid_x0 + cached_grid_w) * BORDER_CELL_SIZE;
+            const float gy1 = (cached_grid_y0 + cached_grid_h) * BORDER_CELL_SIZE;
+            const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
+            PushGameQuad(cached_inaccessible_verts, gx0 - ext, gy0 - ext, gx1 + ext, gy0, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx0 - ext, gy1, gx1 + ext, gy1 + ext, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx0 - ext, gy0, gx0, gy1, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx1, gy0, gx1 + ext, gy1, INACCESSIBLE_COLOR);
+
+            // Non-walkable cells within the grid
+            for (int cy = 0; cy < cached_grid_h; cy++) {
+                for (int cx = 0; cx < cached_grid_w; cx++) {
+                    const int idx = GetCellIndex(cached_grid_x0 + cx, cached_grid_y0 + cy);
+                    if (idx < 0 || cached_walkable_grid[idx]) continue;
+                    const float x0 = (cached_grid_x0 + cx) * BORDER_CELL_SIZE;
+                    const float y0 = (cached_grid_y0 + cy) * BORDER_CELL_SIZE;
+                    PushGameQuad(cached_inaccessible_verts, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, INACCESSIBLE_COLOR);
+                }
+            }
+        }
+
+        std::vector<std::pair<GW::GamePos, GW::GamePos>> raw_segments;
         for (int cy = 0; cy < cached_grid_h; cy++) {
             for (int cx = 0; cx < cached_grid_w; cx++) {
                 const int idx = GetCellIndex(cached_grid_x0 + cx, cached_grid_y0 + cy);
@@ -205,11 +382,16 @@ namespace {
                 const float x1 = x0 + BORDER_CELL_SIZE;
                 const float y1 = y0 + BORDER_CELL_SIZE;
 
-                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy - 1)) cached_border_segments.push_back({{x0, y0, 0}, {x1, y0, 0}});
-                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy + 1)) cached_border_segments.push_back({{x0, y1, 0}, {x1, y1, 0}});
-                if (!IsGridCellWalkable(cached_grid_x0 + cx - 1, cached_grid_y0 + cy)) cached_border_segments.push_back({{x0, y0, 0}, {x0, y1, 0}});
-                if (!IsGridCellWalkable(cached_grid_x0 + cx + 1, cached_grid_y0 + cy)) cached_border_segments.push_back({{x1, y0, 0}, {x1, y1, 0}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy - 1)) raw_segments.push_back({{x0, y0, 0}, {x1, y0, 0}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy + 1)) raw_segments.push_back({{x0, y1, 0}, {x1, y1, 0}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx - 1, cached_grid_y0 + cy)) raw_segments.push_back({{x0, y0, 0}, {x0, y1, 0}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx + 1, cached_grid_y0 + cy)) raw_segments.push_back({{x1, y0, 0}, {x1, y1, 0}});
             }
+        }
+
+        cached_border_polylines = ChainSegments(raw_segments);
+        for (auto& poly : cached_border_polylines) {
+            SmoothPolyline(poly, 2);
         }
     }
 
@@ -774,9 +956,9 @@ namespace {
                 border_map_id = map_id;
                 RebuildMapBorder();
             }
-
-            constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
-            constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
+            if (CountExploredCells() != fog_cache_explored_count) {
+                RebuildFogCache();
+            }
 
             // Compute visible game-coord range for culling
             GW::GamePos viewport_tl_game, viewport_br_game;
@@ -794,27 +976,7 @@ namespace {
                 constexpr float MAX_VALID_COORD = 1e6f;
                 if (fabsf(vis_min_x) > MAX_VALID_COORD || fabsf(vis_min_y) > MAX_VALID_COORD || fabsf(vis_max_x) > MAX_VALID_COORD || fabsf(vis_max_y) > MAX_VALID_COORD) goto draw;
 
-                const int vis_gx0 = static_cast<int>(floorf(vis_min_x / BORDER_CELL_SIZE)) - 1;
-                const int vis_gy0 = static_cast<int>(floorf(vis_min_y / BORDER_CELL_SIZE)) - 1;
-                const int vis_gx1 = static_cast<int>(ceilf(vis_max_x / BORDER_CELL_SIZE)) + 1;
-                const int vis_gy1 = static_cast<int>(ceilf(vis_max_y / BORDER_CELL_SIZE)) + 1;
-
-                const int clamp_gx0 = std::max(vis_gx0, cached_grid_x0);
-                const int clamp_gy0 = std::max(vis_gy0, cached_grid_y0);
-                const int clamp_gx1 = std::min(vis_gx1, cached_grid_x0 + cached_grid_w - 1);
-                const int clamp_gy1 = std::min(vis_gy1, cached_grid_y0 + cached_grid_h - 1);
-
                 fog_start = arena_pos;
-
-                // Inaccessible (non-walkable) cells
-                for (int gy = clamp_gy0; gy <= clamp_gy1; gy++) {
-                    for (int gx = clamp_gx0; gx <= clamp_gx1; gx++) {
-                        if (IsGridCellWalkable(gx, gy)) continue;
-                        const float x0 = gx * BORDER_CELL_SIZE;
-                        const float y0 = gy * BORDER_CELL_SIZE;
-                        push_game_quad(fog_count, x0, y0, x0 + BORDER_CELL_SIZE, y0 + BORDER_CELL_SIZE, INACCESSIBLE_COLOR);
-                    }
-                }
 
                 // Compass range circle
                 {
@@ -832,49 +994,35 @@ namespace {
                     }
                 }
 
-                // Unexplored walkable cells + frontier edges
+                // Frontier edges — cached polylines, smoothed with Chaikin subdivision
                 constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
                 constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
 
-                for (int gy = clamp_gy0 - cached_grid_y0; gy <= clamp_gy1 - cached_grid_y0; gy++) {
-                    if (gy < 0 || gy >= cached_grid_h) continue;
-                    for (int gx = clamp_gx0 - cached_grid_x0; gx <= clamp_gx1 - cached_grid_x0; gx++) {
-                        if (gx < 0 || gx >= cached_grid_w) continue;
-                        if (!cached_walkable_grid[gy * cached_grid_w + gx]) continue;
-                        const int abs_gx = cached_grid_x0 + gx;
-                        const int abs_gy = cached_grid_y0 + gy;
-                        if (IsCellExplored(abs_gx, abs_gy)) continue;
-
-                        const float x0 = abs_gx * BORDER_CELL_SIZE;
-                        const float y0 = abs_gy * BORDER_CELL_SIZE;
-                        const float x1 = x0 + BORDER_CELL_SIZE;
-                        const float y1 = y0 + BORDER_CELL_SIZE;
-
-                        push_game_quad(fog_count, x0, y0, x1, y1, FOG_UNEXPLORED);
-
-                        auto check_neighbor = [&](int nx, int ny, float ex0, float ey0, float ex1, float ey1) {
-                            if (!IsGridCellWalkable(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
-                            if (!IsCellExplored(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
-                            push_thick_line_game(fog_count, ex0, ey0, ex1, ey1, FRONTIER_HALF_THICKNESS, FRONTIER_COLOR);
-                        };
-                        check_neighbor(gx, gy - 1, x0, y0, x1, y0); // North
-                        check_neighbor(gx, gy + 1, x0, y1, x1, y1); // South
-                        check_neighbor(gx - 1, gy, x0, y0, x0, y1); // West
-                        check_neighbor(gx + 1, gy, x1, y0, x1, y1); // East
+                for (const auto& poly : cached_frontier_polylines) {
+                    for (size_t i = 0; i + 1 < poly.points.size(); i++) {
+                        push_thick_line_game(fog_count, poly.points[i].x, poly.points[i].y, poly.points[i + 1].x, poly.points[i + 1].y, FRONTIER_HALF_THICKNESS, FRONTIER_COLOR);
+                    }
+                    if (poly.closed && poly.points.size() >= 2) {
+                        push_thick_line_game(fog_count, poly.points.back().x, poly.points.back().y, poly.points.front().x, poly.points.front().y, FRONTIER_HALF_THICKNESS, FRONTIER_COLOR);
                     }
                 }
 
-                // Map border — culled in game coords
+                // Map border — cached polylines, smoothed with Chaikin subdivision
                 border_start = arena_pos;
                 constexpr DWORD BORDER_COLOR = D3DCOLOR_ARGB(160, 200, 220, 255);
                 constexpr float HALF_THICKNESS = 0.5f;
 
-                for (const auto& seg : cached_border_segments) {
-                    if (std::max(seg.p1.x, seg.p2.x) < vis_min_x) continue;
-                    if (std::min(seg.p1.x, seg.p2.x) > vis_max_x) continue;
-                    if (std::max(seg.p1.y, seg.p2.y) < vis_min_y) continue;
-                    if (std::min(seg.p1.y, seg.p2.y) > vis_max_y) continue;
-                    push_thick_line_game(border_count, seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y, HALF_THICKNESS, BORDER_COLOR);
+                for (const auto& poly : cached_border_polylines) {
+                    for (size_t i = 0; i + 1 < poly.points.size(); i++) {
+                        const auto& p1 = poly.points[i];
+                        const auto& p2 = poly.points[i + 1];
+                        if (std::max(p1.x, p2.x) < vis_min_x || std::min(p1.x, p2.x) > vis_max_x) continue;
+                        if (std::max(p1.y, p2.y) < vis_min_y || std::min(p1.y, p2.y) > vis_max_y) continue;
+                        push_thick_line_game(border_count, p1.x, p1.y, p2.x, p2.y, HALF_THICKNESS, BORDER_COLOR);
+                    }
+                    if (poly.closed && poly.points.size() >= 2) {
+                        push_thick_line_game(border_count, poly.points.back().x, poly.points.back().y, poly.points.front().x, poly.points.front().y, HALF_THICKNESS, BORDER_COLOR);
+                    }
                 }
             }
         }
@@ -1009,7 +1157,8 @@ namespace {
         }
 
     draw:
-        if (!fog_count && !border_count && !line_count && !enemy_count) return;
+        const bool has_fog_quads = !cached_inaccessible_verts.empty() || !cached_unexplored_verts.empty();
+        if (!fog_count && !border_count && !line_count && !enemy_count && !has_fog_quads) return;
 
         // -----------------------------------------------------------------------
         // Render state setup
@@ -1037,8 +1186,43 @@ namespace {
         dx_device->SetScissorRect(&scissorRect);
 
         // -----------------------------------------------------------------------
+        // Draw GPU-projected fog quads (cached in game coordinates)
+        // -----------------------------------------------------------------------
+        if (has_fog_quads) {
+            D3DMATRIX game_to_screen;
+            if (BuildGameToScreenWorldMatrix(game_to_screen)) {
+                D3DMATRIX saved_world, saved_view, saved_proj;
+                dx_device->GetTransform(D3DTS_WORLD, &saved_world);
+                dx_device->GetTransform(D3DTS_VIEW, &saved_view);
+                dx_device->GetTransform(D3DTS_PROJECTION, &saved_proj);
+
+                D3DVIEWPORT9 vp;
+                dx_device->GetViewport(&vp);
+                const auto ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
+
+                dx_device->SetTransform(D3DTS_WORLD, &game_to_screen);
+                dx_device->SetTransform(D3DTS_VIEW, &IDENTITY_MATRIX);
+                dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
+
+                dx_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE);
+                dx_device->SetRenderState(D3DRS_ZENABLE, FALSE);
+                dx_device->SetRenderState(D3DRS_LIGHTING, FALSE);
+
+                if (!cached_inaccessible_verts.empty())
+                    dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, cached_inaccessible_verts.size() / 3, cached_inaccessible_verts.data(), sizeof(GameVertex));
+                if (!cached_unexplored_verts.empty())
+                    dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, cached_unexplored_verts.size() / 3, cached_unexplored_verts.data(), sizeof(GameVertex));
+
+                dx_device->SetTransform(D3DTS_WORLD, &saved_world);
+                dx_device->SetTransform(D3DTS_VIEW, &saved_view);
+                dx_device->SetTransform(D3DTS_PROJECTION, &saved_proj);
+            }
+        }
+
+        // -----------------------------------------------------------------------
         // Draw — all from one contiguous static array, no heap involvement
         // -----------------------------------------------------------------------
+        dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
         if (fog_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_count / 3, vertex_arena + fog_start, sizeof(Vertex));
         if (border_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, border_count / 3, vertex_arena + border_start, sizeof(Vertex));
         if (line_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, line_count / 3, vertex_arena + line_start, sizeof(Vertex));
