@@ -894,7 +894,7 @@ namespace {
         dx_device->SetScissorRect(&scissorRect);
 
         // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
-        if (static_map_geo.Any() || fog_geo.vert_count) {
+        if (static_map_geo.Any() || fog_geo.vert_count || vb.fog_count) {
             D3DVIEWPORT9 vp;
             dx_device->GetViewport(&vp);
             const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
@@ -919,6 +919,9 @@ namespace {
 
             // Static fog (rebuilt when player moves)
             if (fog_geo.vert_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.vert_count / 3, fog_geo.verts, sizeof(FogGeometry::GameVertex));
+
+            // Dynamic per-frame game-coord geometry (compass circle)
+            if (vb.fog_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.fog_count / 3, vb.game_arena + vb.fog_start, sizeof(VertexBuffers::GameVertex));
         }
 
         // Pass 2: Screen-space geometry — XYZRHW bypasses transform pipeline
@@ -1169,7 +1172,7 @@ namespace {
     {
         fog_geo.vert_count = 0;
 
-        if (!explored_cells || !cached_walkable_grid) return;
+        if (!cached_walkable_grid) return;
 
         constexpr DWORD FOG_UNEXPLORED = D3DCOLOR_ARGB(140, 0, 0, 0);
         constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
@@ -1216,7 +1219,7 @@ namespace {
             for (int gx = 0; gx < cached_grid_w; gx++) {
                 const int idx = row_base + gx;
                 if (!cached_walkable_grid[idx]) continue;
-                if (explored_cells[idx]) continue;
+                if (explored_cells && explored_cells[idx]) continue;
 
                 const float x0 = grid_origin_x + gx * BORDER_CELL_SIZE;
                 const float x1 = x0 + BORDER_CELL_SIZE;
@@ -1300,6 +1303,8 @@ namespace {
             if (map_changed || zoom_changed) {
                 if (map_changed) {
                     border_map_id = map_id;
+                    last_fog_player_cx = INT_MIN;
+                    last_fog_player_cy = INT_MIN;
                     RebuildMapBorder(); // rebuilds walkable grid + border segments
                 }
                 border_cached_zoom = mission_map_zoom;
@@ -1307,7 +1312,8 @@ namespace {
                 BuildFogGeometry();
             }
 
-            // Compass range circle
+            // Compass range circle (per-frame, goes into vb game arena)
+            vb.fog_start = vb.game_arena_pos;
             {
                 const auto player = GW::Agents::GetControlledCharacter();
                 if (player) {
@@ -1339,8 +1345,12 @@ namespace {
                     const int player_cy = static_cast<int>(floorf(player->pos.y / BORDER_CELL_SIZE));
 
                     if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
-                        last_fog_player_cx = player_cx;
-                        last_fog_player_cy = player_cy;
+                        // Don't cache position until explored_cells is ready,
+                        // so we keep rebuilding until exploration data arrives.
+                        if (explored_cells) {
+                            last_fog_player_cx = player_cx;
+                            last_fog_player_cy = player_cy;
+                        }
                         BuildFogGeometry();
                     }
                 }
