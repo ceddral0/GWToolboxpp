@@ -348,16 +348,16 @@ namespace {
         {
             constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
 
-            // 4 large strips covering everything outside the grid (scissor rect clips to viewport)
-            constexpr float INF = 1e6f;
+            // 4 strips covering everything outside the grid (scissor rect clips to viewport)
             const float gx0 = cached_grid_x0 * BORDER_CELL_SIZE;
             const float gy0 = cached_grid_y0 * BORDER_CELL_SIZE;
             const float gx1 = (cached_grid_x0 + cached_grid_w) * BORDER_CELL_SIZE;
             const float gy1 = (cached_grid_y0 + cached_grid_h) * BORDER_CELL_SIZE;
-            PushGameQuad(cached_inaccessible_verts, -INF, -INF, INF, gy0, INACCESSIBLE_COLOR);
-            PushGameQuad(cached_inaccessible_verts, -INF, gy1, INF, INF, INACCESSIBLE_COLOR);
-            PushGameQuad(cached_inaccessible_verts, -INF, gy0, gx0, gy1, INACCESSIBLE_COLOR);
-            PushGameQuad(cached_inaccessible_verts, gx1, gy0, INF, gy1, INACCESSIBLE_COLOR);
+            const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
+            PushGameQuad(cached_inaccessible_verts, gx0 - ext, gy0 - ext, gx1 + ext, gy0, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx0 - ext, gy1, gx1 + ext, gy1 + ext, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx0 - ext, gy0, gx0, gy1, INACCESSIBLE_COLOR);
+            PushGameQuad(cached_inaccessible_verts, gx1, gy0, gx1 + ext, gy1, INACCESSIBLE_COLOR);
 
             // Non-walkable cells within the grid
             for (int cy = 0; cy < cached_grid_h; cy++) {
