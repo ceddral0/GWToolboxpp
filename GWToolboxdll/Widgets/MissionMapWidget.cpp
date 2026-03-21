@@ -541,7 +541,7 @@ namespace {
         if (!InitializeMissionMapParameters())
             return;
 
-#ifdef _DEBUG
+#if 0
 
         mission_map_render_context.top_left = mission_map_top_left;
         mission_map_render_context.bottom_right = mission_map_bottom_right;
@@ -725,9 +725,10 @@ namespace {
                 const int ecy = static_cast<int>(floorf(cy / EXPLORE_CELL_SIZE));
                 return explored_cells.contains(CellKey(ecx, ecy));
             };
-
-            for (int gy = 0; gy < cached_grid_h; gy++) {
-                for (int gx = 0; gx < cached_grid_w; gx++) {
+            for (int gy = clamp_gy0 - cached_grid_y0; gy <= clamp_gy1 - cached_grid_y0; gy++) {
+                if (gy < 0 || gy >= cached_grid_h) continue;
+                for (int gx = clamp_gx0 - cached_grid_x0; gx <= clamp_gx1 - cached_grid_x0; gx++) {
+                    if (gx < 0 || gx >= cached_grid_w) continue;
                     if (!cached_walkable_grid[gy * cached_grid_w + gx]) continue;
                     const int abs_gx = cached_grid_x0 + gx;
                     const int abs_gy = cached_grid_y0 + gy;
