@@ -237,6 +237,31 @@ namespace {
 
         static_map_geo.inaccessible_start = 0;
 
+        // 4 strips covering everything outside the grid (scissor rect clips to viewport)
+        {
+            const float gx0 = cached_grid_x0 * BORDER_CELL_SIZE;
+            const float gy0 = cached_grid_y0 * BORDER_CELL_SIZE;
+            const float gx1 = (cached_grid_x0 + cached_grid_w) * BORDER_CELL_SIZE;
+            const float gy1 = (cached_grid_y0 + cached_grid_h) * BORDER_CELL_SIZE;
+            const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
+
+            auto push = [&](float x0, float y0, float x1, float y1) {
+                StaticMapGeometry::GameVertex* v = static_map_geo.Alloc(6);
+                if (!v) return;
+                v[0] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
+                v[1] = {x1, y0, 0.f, INACCESSIBLE_COLOR};
+                v[2] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
+                v[3] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
+                v[4] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
+                v[5] = {x0, y1, 0.f, INACCESSIBLE_COLOR};
+                static_map_geo.inaccessible_count += 6;
+            };
+            push(gx0 - ext, gy0 - ext, gx1 + ext, gy0); // bottom
+            push(gx0 - ext, gy1, gx1 + ext, gy1 + ext);  // top
+            push(gx0 - ext, gy0, gx0, gy1);               // left
+            push(gx1, gy0, gx1 + ext, gy1);               // right
+        }
+
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
             for (int gx = cached_grid_x0; gx < cached_grid_x0 + cached_grid_w; gx++) {
                 if (IsGridCellWalkable(gx, gy)) continue;
@@ -878,7 +903,7 @@ namespace {
         dx_device->SetScissorRect(&scissorRect);
 
         // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
-        if (static_map_geo.Any() || fog_geo.vert_count) {
+        if (static_map_geo.Any() || fog_geo.vert_count || vb.fog_count) {
             D3DVIEWPORT9 vp;
             dx_device->GetViewport(&vp);
             const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
@@ -903,6 +928,9 @@ namespace {
 
             // Static fog (rebuilt when player moves)
             if (fog_geo.vert_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.vert_count / 3, fog_geo.verts, sizeof(FogGeometry::GameVertex));
+
+            // Dynamic per-frame game-coord geometry (compass circle)
+            if (vb.fog_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.fog_count / 3, vb.game_arena + vb.fog_start, sizeof(VertexBuffers::GameVertex));
         }
 
         // Pass 2: Screen-space geometry — XYZRHW bypasses transform pipeline
@@ -1199,7 +1227,7 @@ namespace {
             for (int gx = 0; gx < cached_grid_w; gx++) {
                 const int idx = row_base + gx;
                 if (!cached_walkable_grid[idx]) continue;
-                if (explored_cells[idx]) continue;
+                if (explored_cells && explored_cells[idx]) continue;
 
                 const float x0 = grid_origin_x + gx * BORDER_CELL_SIZE;
                 const float x1 = x0 + BORDER_CELL_SIZE;
@@ -1282,6 +1310,8 @@ namespace {
             if (map_changed || zoom_changed) {
                 if (map_changed) {
                     border_map_id = map_id;
+                    last_fog_player_cx = INT_MIN;
+                    last_fog_player_cy = INT_MIN;
                     RebuildMapBorder(); // rebuilds walkable grid + border segments
                 }
                 border_cached_zoom = mission_map_zoom;
@@ -1289,7 +1319,8 @@ namespace {
                 BuildFogGeometry();
             }
 
-            // Compass range circle
+            // Compass range circle (per-frame, goes into vb game arena)
+            vb.fog_start = vb.game_arena_pos;
             {
                 const auto player = GW::Agents::GetControlledCharacter();
                 if (player) {
@@ -1323,8 +1354,12 @@ namespace {
                     const int player_cy = static_cast<int>(floorf(player->pos.y / BORDER_CELL_SIZE));
 
                     if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
-                        last_fog_player_cx = player_cx;
-                        last_fog_player_cy = player_cy;
+                        // Don't cache position until explored_cells is ready,
+                        // so we keep rebuilding until exploration data arrives.
+                        if (explored_cells) {
+                            last_fog_player_cx = player_cx;
+                            last_fog_player_cy = player_cy;
+                        }
                         BuildFogGeometry();
                     }
                 }
