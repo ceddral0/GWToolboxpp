@@ -227,6 +227,31 @@ namespace {
         constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
         static_map_geo.inaccessible_start = 0;
 
+        // 4 strips covering everything outside the grid (scissor rect clips to viewport)
+        {
+            const float gx0 = cached_grid_x0 * BORDER_CELL_SIZE;
+            const float gy0 = cached_grid_y0 * BORDER_CELL_SIZE;
+            const float gx1 = (cached_grid_x0 + cached_grid_w) * BORDER_CELL_SIZE;
+            const float gy1 = (cached_grid_y0 + cached_grid_h) * BORDER_CELL_SIZE;
+            const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
+
+            auto push = [&](float x0, float y0, float x1, float y1) {
+                StaticMapGeometry::GameVertex* v = static_map_geo.Alloc(6);
+                if (!v) return;
+                v[0] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
+                v[1] = {x1, y0, 0.f, INACCESSIBLE_COLOR};
+                v[2] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
+                v[3] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
+                v[4] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
+                v[5] = {x0, y1, 0.f, INACCESSIBLE_COLOR};
+                static_map_geo.inaccessible_count += 6;
+            };
+            push(gx0 - ext, gy0 - ext, gx1 + ext, gy0); // bottom
+            push(gx0 - ext, gy1, gx1 + ext, gy1 + ext);  // top
+            push(gx0 - ext, gy0, gx0, gy1);               // left
+            push(gx1, gy0, gx1 + ext, gy1);               // right
+        }
+
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
             for (int gx = cached_grid_x0; gx < cached_grid_x0 + cached_grid_w; gx++) {
                 if (IsGridCellWalkable(gx, gy)) continue;
