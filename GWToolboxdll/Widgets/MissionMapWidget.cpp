@@ -38,6 +38,9 @@ namespace {
     constexpr float COMPASS_RANGE = 5000.0f;
     constexpr float STALE_CHECK_RANGE = COMPASS_RANGE * 0.9f;
 
+    // Pixel-to-game-unit scale — converts pixel thickness to game units
+    float cached_px_to_game = 1.f;
+
     struct StaticMapGeometry {
         struct GameVertex {
             float x, y, z;
@@ -218,8 +221,8 @@ namespace {
         // px_to_game at the current zoom = 1 / (mission_map_scale.x * mission_map_zoom * world_map_units_per_game_unit)
         // We can recover this from g2s directly since it's already been rebuilt this frame.
         constexpr float TARGET_THICKNESS_PX = 1.f;
-        const float px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : BORDER_CELL_SIZE / 600.0f; // fallback if basis not yet built
-        const float border_thickness_game = TARGET_THICKNESS_PX * px_to_game;
+        cached_px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : BORDER_CELL_SIZE / 600.0f; // fallback if basis not yet built
+        const float border_thickness_game = TARGET_THICKNESS_PX * cached_px_to_game;
 
         constexpr DWORD INACCESSIBLE_COLOR = D3DCOLOR_ARGB(190, 0, 0, 0);
         static_map_geo.inaccessible_start = 0;
@@ -1105,6 +1108,14 @@ namespace {
         }
     }
 
+    // Returns true if the cell at flat local grid index `idx` is walkable and explored,
+    // making the shared edge a frontier border. Caller is responsible for bounds checking.
+    bool IsFrontierEdge(int idx)
+    {
+        if (!show_exploration_overlay || !explored_cells) return false;
+        return cached_walkable_grid[idx] && explored_cells[idx];
+    }
+
     // -----------------------------------------------------------------------
     // Draw — builds geometry into VertexBuffers, then submits
     // -----------------------------------------------------------------------
@@ -1118,8 +1129,7 @@ namespace {
         static VertexBuffers vb;
         vb.Reset();
 
-        // Pixel-to-game-unit scale — converts pixel thickness to game units
-        const float px_to_game = 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay);
+
 
         // -----------------------------------------------------------------------
         // Custom renderer lines — screen space
@@ -1172,11 +1182,18 @@ namespace {
                     constexpr DWORD CIRCLE_COLOR = D3DCOLOR_ARGB(100, 180, 220, 255);
                     constexpr float CIRCLE_THICKNESS = 0.5f;
                     const float px = player->pos.x, py = player->pos.y;
-                    const float game_thickness = CIRCLE_THICKNESS * px_to_game;
+                    const float game_thickness = CIRCLE_THICKNESS * cached_px_to_game;
+
+                    // Precompute all points — each trig result used twice (end of seg N, start of seg N+1)
+                    GW::Vec2f pts[CIRCLE_SEGMENTS + 1];
+                    for (int i = 0; i <= CIRCLE_SEGMENTS; i++) {
+                        const float a = static_cast<float>(i) / CIRCLE_SEGMENTS * TWO_PI;
+                        pts[i] = {px + COMPASS_RANGE * cosf(a), py + COMPASS_RANGE * sinf(a)};
+                    }
+                    // pts[0] == pts[CIRCLE_SEGMENTS] so the circle closes cleanly
+
                     for (int i = 0; i < CIRCLE_SEGMENTS; i++) {
-                        const float a1 = static_cast<float>(i) / CIRCLE_SEGMENTS * TWO_PI;
-                        const float a2 = static_cast<float>(i + 1) / CIRCLE_SEGMENTS * TWO_PI;
-                        EnqueueThickLineGame(vb, vb.fog_count, px + COMPASS_RANGE * cosf(a1), py + COMPASS_RANGE * sinf(a1), px + COMPASS_RANGE * cosf(a2), py + COMPASS_RANGE * sinf(a2), game_thickness, CIRCLE_COLOR);
+                        EnqueueThickLineGame(vb, vb.fog_count, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, game_thickness, CIRCLE_COLOR);
                     }
                 }
             }
@@ -1184,31 +1201,30 @@ namespace {
             // Unexplored walkable cells + frontier edges
             constexpr DWORD FRONTIER_COLOR = D3DCOLOR_ARGB(200, 255, 200, 50);
             constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
-            const float frontier_game = FRONTIER_HALF_THICKNESS * px_to_game;
+            const float frontier_game = FRONTIER_HALF_THICKNESS * cached_px_to_game;
+
+            // Base game coord of the grid origin — add cell offsets to avoid repeated multiply
+            const float grid_origin_x = cached_grid_x0 * BORDER_CELL_SIZE;
+            const float grid_origin_y = cached_grid_y0 * BORDER_CELL_SIZE;
 
             for (int gy = 0; gy < cached_grid_h; gy++) {
-                for (int gx = 0; gx < cached_grid_w; gx++) {
-                    if (!cached_walkable_grid[gy * cached_grid_w + gx]) continue;
-                    const int abs_gx = cached_grid_x0 + gx;
-                    const int abs_gy = cached_grid_y0 + gy;
-                    if (IsCellExplored(abs_gx, abs_gy)) continue;
+                const float y0 = grid_origin_y + gy * BORDER_CELL_SIZE;
+                const float y1 = y0 + BORDER_CELL_SIZE;
+                const int row_base = gy * cached_grid_w;
 
-                    const float x0 = abs_gx * BORDER_CELL_SIZE;
-                    const float y0 = abs_gy * BORDER_CELL_SIZE;
+                for (int gx = 0; gx < cached_grid_w; gx++) {
+                    if (!cached_walkable_grid[row_base + gx]) continue;
+                    if (explored_cells && explored_cells[row_base + gx]) continue;
+
+                    const float x0 = grid_origin_x + gx * BORDER_CELL_SIZE;
                     const float x1 = x0 + BORDER_CELL_SIZE;
-                    const float y1 = y0 + BORDER_CELL_SIZE;
 
                     EnqueueGameQuad(vb, vb.fog_count, x0, y0, x1, y1, FOG_UNEXPLORED);
 
-                    auto check_neighbor = [&](int nx, int ny, float ex0, float ey0, float ex1, float ey1) {
-                        if (!IsGridCellWalkable(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
-                        if (!IsCellExplored(cached_grid_x0 + nx, cached_grid_y0 + ny)) return;
-                        EnqueueThickLineGame(vb, vb.fog_count, ex0, ey0, ex1, ey1, frontier_game, FRONTIER_COLOR);
-                    };
-                    check_neighbor(gx, gy - 1, x0, y0, x1, y0); // North
-                    check_neighbor(gx, gy + 1, x0, y1, x1, y1); // South
-                    check_neighbor(gx - 1, gy, x0, y0, x0, y1); // West
-                    check_neighbor(gx + 1, gy, x1, y0, x1, y1); // East
+                    if (gy > 0 && IsFrontierEdge(row_base - cached_grid_w + gx)) EnqueueThickLineGame(vb, vb.fog_count, x0, y0, x1, y0, frontier_game, FRONTIER_COLOR);                 // North
+                    if (gy < cached_grid_h - 1 && IsFrontierEdge(row_base + cached_grid_w + gx)) EnqueueThickLineGame(vb, vb.fog_count, x0, y1, x1, y1, frontier_game, FRONTIER_COLOR); // South
+                    if (gx > 0 && IsFrontierEdge(row_base + gx - 1)) EnqueueThickLineGame(vb, vb.fog_count, x0, y0, x0, y1, frontier_game, FRONTIER_COLOR);                             // West
+                    if (gx < cached_grid_w - 1 && IsFrontierEdge(row_base + gx + 1)) EnqueueThickLineGame(vb, vb.fog_count, x1, y0, x1, y1, frontier_game, FRONTIER_COLOR);             // East
                 }
             }
         }
