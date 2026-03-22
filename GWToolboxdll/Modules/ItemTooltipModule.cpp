@@ -218,7 +218,7 @@ namespace {
         }
         if (!description.empty())
             description += L"\x2";
-        description += EncodedNewParagraph + L"\x2" + EncodedColouredString(EncodedLiteral(text), salvage_color);
+        description += EncodedNewParagraph + L"\x2" + EncodedColouredString(EncodedLiteral(text), nicholas_color);
     }
 
     // -------------------------------------------------------------------------
