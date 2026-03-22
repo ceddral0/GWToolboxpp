@@ -93,7 +93,6 @@ private:
     static void CHAT_CMD_FUNC(CmdTransmoTarget);
     static void CHAT_CMD_FUNC(CmdTransmoParty);
     static void CHAT_CMD_FUNC(CmdTransmoAgent);
-    static void CHAT_CMD_FUNC(CmdHeroBehaviour);
     static void CHAT_CMD_FUNC(CmdPingQuest);
     static void CHAT_CMD_FUNC(CmdMorale);
     static void CHAT_CMD_FUNC(CmdVolume);
