@@ -907,7 +907,8 @@ namespace {
         dx_device->SetScissorRect(&scissorRect);
 
         // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
-        if (static_map_geo.Any() || fog_geo.vert_count || vb.fog_count) {
+        const bool in_explorable = GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
+        if ((static_map_geo.Any() || fog_geo.vert_count || vb.fog_count) && show_vq_overlay && in_explorable) {
             D3DVIEWPORT9 vp;
             dx_device->GetViewport(&vp);
             const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
