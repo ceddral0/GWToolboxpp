@@ -84,7 +84,4 @@ public:
 
     static void AddPendingMessage(PendingChatMessage* pending_chat_message);
     static void SetAfkMessage(std::wstring&& message);
-
-    // Temporarily suppress chat messages containing the given encoded substring.
-    static void SuppressChatMessageForMs(const wchar_t* encoded_substring, size_t len, DWORD ms);
 };

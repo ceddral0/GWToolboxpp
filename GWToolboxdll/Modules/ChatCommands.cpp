@@ -64,6 +64,7 @@
 
 #include "QuestModule.h"
 #include <Utils/ToolboxUtils.h>
+#include "ChatFilter.h"
 
 constexpr auto CMDTITLE_KEEP_CURRENT = 0xfffe;
 constexpr auto CMDTITLE_REMOVE_CURRENT = 0xffff;
@@ -3183,16 +3184,16 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
     if (!flags) return;
     // Argument validation
     if (argc < 2) {
-        return Log::ErrorW(syntax);
+        return Log::WarningW(syntax);
     }
 
     // Check if last argument is "silent" - suppress hero behavior chat messages
     int effective_argc = argc;
-    if (argc >= 2 && wcscmp(argv[argc - 1], L"silent") == 0) {
-        constexpr DWORD SUPPRESS_MS = 1000;
-        ChatSettings::SuppressChatMessageForMs(GW::EncStrings::HeroBehavior::Fight, 2, SUPPRESS_MS);
-        ChatSettings::SuppressChatMessageForMs(GW::EncStrings::HeroBehavior::Guard, 2, SUPPRESS_MS);
-        ChatSettings::SuppressChatMessageForMs(GW::EncStrings::HeroBehavior::Avoid, 2, SUPPRESS_MS);
+    if (argc >= 2 && TextUtils::ToLower(argv[argc - 1]) == L"silent") {
+        constexpr clock_t SUPPRESS_MS = 1000;
+        ChatFilter::BlockMessageForMs(GW::EncStrings::HeroBehavior::Fight, SUPPRESS_MS);
+        ChatFilter::BlockMessageForMs(GW::EncStrings::HeroBehavior::Guard, SUPPRESS_MS);
+        ChatFilter::BlockMessageForMs(GW::EncStrings::HeroBehavior::Avoid, SUPPRESS_MS);
         effective_argc--;
     }
 
@@ -3212,7 +3213,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
         behaviour = 0xff; // target
     }
     else {
-        return Log::ErrorW(syntax);
+        return Log::WarningW(syntax);
     }
 
     auto flag_hero = [behaviour](uint32_t agent_id) {
@@ -3233,7 +3234,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
     size_t hero_index = 0; // This is 1 based!
     if (TextUtils::ParseUInt(hero_name.c_str(), &hero_index)) {
         if (hero_index < 1 || hero_index > flags->size()) {
-            Log::ErrorW(L"Failed to find hero %d", hero_index);
+            Log::LogW(L"Failed to find hero %d", hero_index);
             return;
         }
         size_t out_index = 0;
@@ -3258,7 +3259,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
             }
         }
         if (!flagged) {
-            Log::ErrorW(L"Failed to find hero %s", hero_name.c_str());
+            Log::LogW(L"Failed to find hero %s", hero_name.c_str());
         }
     });
 

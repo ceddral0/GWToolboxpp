@@ -70,6 +70,12 @@ namespace {
     bool filter_channel_alliance = false;
     bool filter_channel_emotes = false;
 
+    struct SuppressedMessage {
+        std::wstring substring;
+        clock_t expires_at;
+    };
+    std::vector<SuppressedMessage> suppressed_messages;
+
     const char* targetting_messages_help = "'I'm following <target>.'\n\
 'I'm attacking <target>.'\n\
 'I'm targetting <target>.'\n\
@@ -652,12 +658,27 @@ namespace {
     // Should this message be ignored by content?
     bool ShouldIgnoreByContent(const wchar_t* message)
     {
+        if (!(message && *message)) {
+            return false;
+        }
+        if (!suppressed_messages.empty()) {
+            const auto now = TIMER_INIT();
+            for (auto it = suppressed_messages.begin(); it != suppressed_messages.end();) {
+                if (now > it->expires_at) {
+                    it = suppressed_messages.erase(it);
+                    continue;
+                }
+                if (wcsstr(message, it->substring.c_str())) {
+                    return true;
+                }
+                ++it;
+            }
+        }
+
         if (!messagebycontent) {
             return false;
         }
-        if (!message) {
-            return false;
-        }
+
         if (!(message[0] == 0x108 && message[1] == 0x107)
             && !(message[0] == 0x8102 && message[1] == 0xEFE && message[2] == 0x107)) {
             return false;
@@ -827,6 +848,10 @@ void ChatFilter::Terminate() {
     ToolboxModule::Terminate();
 
     GW::UI::RemoveUIMessageCallback(&BlockIfApplicable_Entry);
+}
+
+void ChatFilter::BlockMessageForMs(const wchar_t* message_contains, clock_t ms) {
+    suppressed_messages.push_back({message_contains, TIMER_INIT() + ms});
 }
 
 void ChatFilter::LoadSettings(ToolboxIni* ini)
