@@ -23,6 +23,28 @@
 #include <GWCA/Utilities/Hooker.h>
 
 namespace {
+    struct SuppressedMessage {
+        std::wstring substring;
+        DWORD expires_at;
+    };
+    std::vector<SuppressedMessage> suppressed_messages;
+
+    bool ShouldSuppressChatMessage(const wchar_t* message)
+    {
+        if (!message || suppressed_messages.empty()) return false;
+        const DWORD now = GetTickCount();
+        for (auto it = suppressed_messages.begin(); it != suppressed_messages.end();) {
+            if (now > it->expires_at) {
+                it = suppressed_messages.erase(it);
+                continue;
+            }
+            if (wcsstr(message, it->substring.c_str())) {
+                return true;
+            }
+            ++it;
+        }
+        return false;
+    }
     // Settings
     bool show_timestamps = false;
     bool hide_player_speech_bubbles = false;
@@ -401,6 +423,18 @@ namespace {
                 if (param->channel == GW::Chat::Channel::CHANNEL_GROUP || param->channel == GW::Chat::Channel::CHANNEL_ALLIES)
                     param->channel = GW::Chat::Channel::CHANNEL_EMOTE;
             } break;
+            case GW::UI::UIMessage::kPrintChatMessage: {
+                const auto param = static_cast<GW::UI::UIPacket::kPrintChatMessage*>(wParam);
+                if (ShouldSuppressChatMessage(param->message)) {
+                    status->blocked = true;
+                }
+            } break;
+            case GW::UI::UIMessage::kLogChatMessage: {
+                const auto param = static_cast<GW::UI::UIPacket::kLogChatMessage*>(wParam);
+                if (ShouldSuppressChatMessage(param->message)) {
+                    status->blocked = true;
+                }
+            } break;
             case GW::UI::UIMessage::kStartWhisper: {
                 OnStartWhisper(status, message_id, wParam, lParam);
             } break;
@@ -426,7 +460,8 @@ void ChatSettings::Initialize()
 
     constexpr GW::UI::UIMessage ui_messages[] = {GW::UI::UIMessage::kAgentSpeechBubble, GW::UI::UIMessage::kDialogueMessage, GW::UI::UIMessage::kPreferenceFlagChanged,    GW::UI::UIMessage::kPreferenceValueChanged,
                                                  GW::UI::UIMessage::kPlayerChatMessage, GW::UI::UIMessage::kWriteToChatLog,  GW::UI::UIMessage::kWriteToChatLogWithSender, GW::UI::UIMessage::kRecvWhisper,
-                                                 GW::UI::UIMessage::kStartWhisper,      GW::UI::UIMessage::kSendChatMessage, GW::UI::UIMessage::kAgentSpeechBubble};
+                                                 GW::UI::UIMessage::kStartWhisper,      GW::UI::UIMessage::kSendChatMessage, GW::UI::UIMessage::kAgentSpeechBubble,
+                                                 GW::UI::UIMessage::kPrintChatMessage,  GW::UI::UIMessage::kLogChatMessage};
     for (const auto message_id : ui_messages) {
         GW::UI::RegisterUIMessageCallback(&OnUIMessage_Entry, message_id, OnUIMessage);
     }
@@ -659,4 +694,10 @@ void ChatSettings::SetAfkMessage(std::wstring&& message)
     else {
         Log::Error("Afk message must be under 80 characters. (Yours is %zu)", message.size());
     }
+}
+
+void ChatSettings::SuppressChatMessageForMs(const wchar_t* encoded_substring, const size_t len, const DWORD ms)
+{
+    const DWORD expires_at = GetTickCount() + ms;
+    suppressed_messages.push_back({std::wstring(encoded_substring, len), expires_at});
 }

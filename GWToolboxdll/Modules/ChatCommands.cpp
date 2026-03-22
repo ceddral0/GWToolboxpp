@@ -45,6 +45,7 @@
 #include <Keys.h>
 #include <Logger.h>
 
+#include <Constants/EncStrings.h>
 #include <Modules/ChatCommands.h>
 #include <Modules/GameSettings.h>
 #include <Modules/ChatSettings.h>
@@ -3175,7 +3176,7 @@ void GetFlaggableHeroNames(std::function<void(std::map<uint32_t, std::wstring>*)
 
 void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
 {
-    const wchar_t* syntax = L"Syntax: /hero [avoid|guard|attack|target] [hero_name|hero_index]";
+    const wchar_t* syntax = L"Syntax: /hero [avoid|guard|attack|target] [hero_name|hero_index] [silent]";
 
     GW::WorldContext* w = GW::GetWorldContext();
     GW::HeroFlagArray* flags = w ? &w->hero_flags : nullptr;
@@ -3184,6 +3185,17 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
     if (argc < 2) {
         return Log::ErrorW(syntax);
     }
+
+    // Check if last argument is "silent" - suppress hero behavior chat messages
+    int effective_argc = argc;
+    if (argc >= 2 && wcscmp(argv[argc - 1], L"silent") == 0) {
+        constexpr DWORD SUPPRESS_MS = 1000;
+        ChatSettings::SuppressChatMessageForMs(GW::EncStrings::HeroBehavior::Fight, 2, SUPPRESS_MS);
+        ChatSettings::SuppressChatMessageForMs(GW::EncStrings::HeroBehavior::Guard, 2, SUPPRESS_MS);
+        ChatSettings::SuppressChatMessageForMs(GW::EncStrings::HeroBehavior::Avoid, 2, SUPPRESS_MS);
+        effective_argc--;
+    }
+
     // set behavior based on command message
     auto behaviour = 0xff;
     const std::wstring arg1 = TextUtils::ToLower(argv[1]);
@@ -3211,8 +3223,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdHeroBehaviour)
         return GW::PartyMgr::SetHeroBehavior(agent_id, (GW::HeroBehavior)behaviour);
     };
 
-
-    if (argc < 3) {
+    if (effective_argc < 3) {
         for (const auto& flag : *flags) {
             flag_hero(flag.agent_id);
         }
