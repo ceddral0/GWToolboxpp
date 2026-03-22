@@ -496,7 +496,11 @@ namespace {
             if (!agent) continue;
             const auto living = agent->GetAsAgentLiving();
             if (!living) continue;
-            if (living->allegiance != GW::Constants::Allegiance::Enemy) continue;
+            if (living->allegiance != GW::Constants::Allegiance::Enemy) {
+                // Allegiance changed — stop tracking
+                tracked_enemies.erase(agent->agent_id);
+                continue;
+            }
             const auto npc = GW::Agents::GetNPCByID(living->player_number);
             if (npc && (npc->IsSpirit() || npc->IsMinion())) continue;
 
