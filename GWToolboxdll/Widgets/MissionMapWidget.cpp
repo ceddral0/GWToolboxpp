@@ -1466,28 +1466,19 @@ void MissionMapWidget::DrawSettingsInternal()
     ImGui::ShowHelp("Tracks enemy positions as they enter compass range.\nBlue = alive, Orange = last known (moved away).\nArrows on orange markers show last movement direction.\nAlso highlights areas you've explored during this session on the mission map.");
 
     if (show_vq_overlay) {
-        ImGui::Separator();
-        ImGui::Text("Vanquish Overlay Colours");
         ImGui::Indent();
         // Flag that triggers a static geometry rebuild if colour changes
         bool static_changed = false;
         bool fog_changed = false;
 
-        static_changed |= ImGui::ColorButtonPicker("Inaccessible area", &vq_color_inaccessible, 0);
-        ImGui::SameLine();
-        static_changed |= ImGui::ColorButtonPicker("Map border", &vq_color_border, 0);
-        ImGui::SameLine();
-        fog_changed |= ImGui::ColorButtonPicker("Unexplored fog", &vq_color_fog_unexplored, 0);
-        ImGui::SameLine();
-        fog_changed |= ImGui::ColorButtonPicker("Frontier edge", &vq_color_frontier, 0);
-        ImGui::SameLine();
-        ImGui::ColorButtonPicker("Compass range", &vq_color_compass, 0);
-        ImGui::SameLine();
-        ImGui::ColorButtonPicker("Enemy (alive)", &vq_color_enemy_alive, 0);
-        ImGui::SameLine();
-        ImGui::ColorButtonPicker("Enemy (stale)", &vq_color_enemy_stale, 0);
-        ImGui::SameLine();
-        ImGui::ColorButtonPicker("Enemy outline", &vq_color_enemy_outline, 0);
+        static_changed |= Colors::DrawSettingHueWheel("Inaccessible area", &vq_color_inaccessible);
+        static_changed |= Colors::DrawSettingHueWheel("Map border", &vq_color_border);
+        fog_changed |= Colors::DrawSettingHueWheel("Unexplored fog", &vq_color_fog_unexplored);
+        fog_changed |= Colors::DrawSettingHueWheel("Frontier edge", &vq_color_frontier);
+        Colors::DrawSettingHueWheel("Compass range", &vq_color_compass);
+        Colors::DrawSettingHueWheel("Enemy (alive)", &vq_color_enemy_alive);
+        Colors::DrawSettingHueWheel("Enemy (last known position)", &vq_color_enemy_stale);
+        Colors::DrawSettingHueWheel("Enemy outline", &vq_color_enemy_outline);
         ImGui::Unindent();
 
         if (static_changed) BuildStaticMapGeometry();
