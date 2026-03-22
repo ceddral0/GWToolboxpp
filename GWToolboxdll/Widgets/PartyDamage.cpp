@@ -88,6 +88,7 @@ struct PartyDamage::PlayerDamage {
     uint32_t agent_id = 0;
     GW::Constants::Profession primary = GW::Constants::Profession::None;
     GW::Constants::Profession secondary = GW::Constants::Profession::None;
+    std::wstring name;
 
     void Reset()
     {
@@ -98,6 +99,7 @@ struct PartyDamage::PlayerDamage {
         agent_id = 0;
         primary = GW::Constants::Profession::None;
         secondary = GW::Constants::Profession::None;
+        name.clear();
     }
 };
 
@@ -108,6 +110,9 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
         return;
     }
     if (damage[index].damage <= 0 && damage[index].healing <= 0) {
+        return;
+    }
+    if (damage[index].name.empty()) {
         return;
     }
 
@@ -137,7 +142,7 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
             rank,
             GetWProfessionAcronym(damage[index].primary),
             GetWProfessionAcronym(damage[index].secondary),
-            party_names_by_index[index]->wstring().c_str(),
+            damage[index].name.c_str(),
             GetPercentageOfTotal(damage[index].damage),
             damage[index].damage,
             GetPercentageOfTotalHealing(damage[index].healing),
@@ -148,7 +153,7 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
             rank,
             GetWProfessionAcronym(damage[index].primary),
             GetWProfessionAcronym(damage[index].secondary),
-            party_names_by_index[index]->wstring().c_str(),
+            damage[index].name.c_str(),
             GetPercentageOfTotal(damage[index].damage),
             damage[index].damage);
     }
@@ -157,7 +162,7 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
             rank,
             GetWProfessionAcronym(damage[index].primary),
             GetWProfessionAcronym(damage[index].secondary),
-            party_names_by_index[index]->wstring().c_str(),
+            damage[index].name.c_str(),
             GetPercentageOfTotalHealing(damage[index].healing),
             damage[index].healing);
     }
@@ -223,7 +228,8 @@ void PartyDamage::DamagePacketCallback(GW::HookStatus*, const GW::Packet::StoC::
     if (cause->allegiance != GW::Constants::Allegiance::Ally_NonAttackable)
         return; // Ignore damage/heals caused by non-allied NPCs
 
-    auto entry = GetDamageByAgentId(cause->agent_id);
+    uint32_t party_idx = 0;
+    auto entry = GetDamageByAgentId(cause->agent_id, &party_idx);
     if (!entry)
         return;
 
@@ -276,6 +282,13 @@ void PartyDamage::DamagePacketCallback(GW::HookStatus*, const GW::Packet::StoC::
         entry->agent_id = packet->cause_id;
         entry->primary = static_cast<GW::Constants::Profession>(cause->primary);
         entry->secondary = static_cast<GW::Constants::Profession>(cause->secondary);
+    }
+
+    if (entry->name.empty() && party_idx < party_names_by_index.size()) {
+        const auto& decoded = party_names_by_index[party_idx]->wstring();
+        if (!decoded.empty()) {
+            entry->name = decoded;
+        }
     }
 
     if (is_damage) {
@@ -401,6 +414,18 @@ void PartyDamage::Update(const float)
         }
     }
     FetchPartyInfo();
+
+    // Update names for damage entries whose names weren't decoded yet
+    for (const auto& [agent_id, party_idx] : party_indeces_by_agent_id) {
+        if (party_idx >= damage.size() || party_idx >= party_names_by_index.size())
+            continue;
+        if (damage[party_idx].agent_id == 0 || !damage[party_idx].name.empty())
+            continue;
+        const auto& decoded = party_names_by_index[party_idx]->wstring();
+        if (!decoded.empty()) {
+            damage[party_idx].name = decoded;
+        }
+    }
 }
 
 void PartyDamage::Draw(IDirect3DDevice9* )
