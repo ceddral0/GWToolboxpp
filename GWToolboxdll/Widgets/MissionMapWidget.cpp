@@ -50,11 +50,12 @@ namespace {
     // Pixel-to-game-unit scale — converts pixel thickness to game units
     float cached_px_to_game = 1.f;
 
-    struct StaticMapGeometry {
         struct GameVertex {
-            float x, y, z;
-            DWORD color;
-        };
+        float x, y, z;
+        DWORD color;
+    }; // D3DFVF_XYZ | D3DFVF_DIFFUSE
+
+    struct StaticMapGeometry {
 
         static constexpr int MAX_VERTS = 1 << 20;
         GameVertex verts[MAX_VERTS];
@@ -219,6 +220,39 @@ namespace {
         return cx1 > left && cx0 < right;
     }
 
+    // Game-coord thick line (XYZ). half_thickness is in game units.
+    int EnqueueLine(GameVertex* v, float x1, float y1, float x2, float y2, float half_thickness, DWORD color)
+    {
+        if (!v) return 0;
+        const float dx = x2 - x1, dy = y2 - y1;
+        const float len_sq = dx * dx + dy * dy;
+        if (len_sq < 0.000001f) return 0;
+
+        const float inv_len = 1.0f / sqrtf(len_sq);
+        const float nx = -dy * inv_len, ny = dx * inv_len;
+        const float ix = nx * half_thickness, iy = ny * half_thickness;
+
+        if (!v) return 0;
+        v[0] = {x1 + ix, y1 + iy, 0.f, color};
+        v[1] = {x1 - ix, y1 - iy, 0.f, color};
+        v[2] = {x2 - ix, y2 - iy, 0.f, color};
+        v[3] = {x1 + ix, y1 + iy, 0.f, color};
+        v[4] = {x2 - ix, y2 - iy, 0.f, color};
+        v[5] = {x2 + ix, y2 + iy, 0.f, color};
+        return 6;
+    }
+
+    int EnqueueQuad(GameVertex* v, float x0, float y0, float x1, float y1, DWORD color)
+    {
+        v[0] = {x0, y0, 0.f, color};
+        v[1] = {x1, y0, 0.f, color};
+        v[2] = {x1, y1, 0.f, color};
+        v[3] = {x0, y0, 0.f, color};
+        v[4] = {x1, y1, 0.f, color};
+        v[5] = {x0, y1, 0.f, color};
+        return 6;
+    }
+
     void BuildStaticMapGeometry()
     {
         static_map_geo.vert_count = 0;
@@ -246,21 +280,10 @@ namespace {
             const float gy1 = (cached_grid_y0 + cached_grid_h) * BORDER_CELL_SIZE;
             const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
 
-            auto push = [&](float x0, float y0, float x1, float y1) {
-                StaticMapGeometry::GameVertex* v = static_map_geo.Alloc(6);
-                if (!v) return;
-                v[0] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
-                v[1] = {x1, y0, 0.f, INACCESSIBLE_COLOR};
-                v[2] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
-                v[3] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
-                v[4] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
-                v[5] = {x0, y1, 0.f, INACCESSIBLE_COLOR};
-                static_map_geo.inaccessible_count += 6;
-            };
-            push(gx0 - ext, gy0 - ext, gx1 + ext, gy0); // bottom
-            push(gx0 - ext, gy1, gx1 + ext, gy1 + ext);  // top
-            push(gx0 - ext, gy0, gx0, gy1);               // left
-            push(gx1, gy0, gx1 + ext, gy1);               // right
+            static_map_geo.inaccessible_count += EnqueueQuad(static_map_geo.Alloc(6), gx0 - ext, gy0 - ext, gx1 + ext, gy0, INACCESSIBLE_COLOR);
+            static_map_geo.inaccessible_count += EnqueueQuad(static_map_geo.Alloc(6), gx0 - ext, gy1, gx1 + ext, gy1 + ext, INACCESSIBLE_COLOR);
+            static_map_geo.inaccessible_count += EnqueueQuad(static_map_geo.Alloc(6), gx0 - ext, gy0, gx0, gy1, INACCESSIBLE_COLOR);
+            static_map_geo.inaccessible_count += EnqueueQuad(static_map_geo.Alloc(6), gx1, gy0, gx1 + ext, gy1, INACCESSIBLE_COLOR);
         }
 
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
@@ -270,37 +293,15 @@ namespace {
                 const float y0 = gy * BORDER_CELL_SIZE;
                 const float x1 = x0 + BORDER_CELL_SIZE;
                 const float y1 = y0 + BORDER_CELL_SIZE;
-                StaticMapGeometry::GameVertex* v = static_map_geo.Alloc(6);
-                if (!v) goto border; // arena full
-                v[0] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
-                v[1] = {x1, y0, 0.f, INACCESSIBLE_COLOR};
-                v[2] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
-                v[3] = {x0, y0, 0.f, INACCESSIBLE_COLOR};
-                v[4] = {x1, y1, 0.f, INACCESSIBLE_COLOR};
-                v[5] = {x0, y1, 0.f, INACCESSIBLE_COLOR};
-                static_map_geo.inaccessible_count += 6;
+
+                static_map_geo.inaccessible_count += EnqueueQuad(static_map_geo.Alloc(6), x0, y0, x1, y1, INACCESSIBLE_COLOR);
             }
         }
 
-    border:
         static_map_geo.border_start = static_map_geo.vert_count;
 
         for (const auto& seg : cached_border_segments) {
-            const float dx = seg.p2.x - seg.p1.x, dy = seg.p2.y - seg.p1.y;
-            const float len_sq = dx * dx + dy * dy;
-            if (len_sq < 0.000001f) continue;
-            const float inv_len = 1.0f / sqrtf(len_sq);
-            const float nx = -dy * inv_len, ny = dx * inv_len;
-            const float ix = nx * border_thickness_game, iy = ny * border_thickness_game;
-            StaticMapGeometry::GameVertex* v = static_map_geo.Alloc(6);
-            if (!v) break;
-            v[0] = {seg.p1.x + ix, seg.p1.y + iy, 0.f, BORDER_COLOR};
-            v[1] = {seg.p1.x - ix, seg.p1.y - iy, 0.f, BORDER_COLOR};
-            v[2] = {seg.p2.x - ix, seg.p2.y - iy, 0.f, BORDER_COLOR};
-            v[3] = {seg.p1.x + ix, seg.p1.y + iy, 0.f, BORDER_COLOR};
-            v[4] = {seg.p2.x - ix, seg.p2.y - iy, 0.f, BORDER_COLOR};
-            v[5] = {seg.p2.x + ix, seg.p2.y + iy, 0.f, BORDER_COLOR};
-            static_map_geo.border_count += 6;
+            static_map_geo.border_count += EnqueueLine(static_map_geo.Alloc(6), seg.p1.x, seg.p1.y, seg.p2.x, seg.p2.y, border_thickness_game, BORDER_COLOR);
         }
     }
 
@@ -562,10 +563,6 @@ namespace {
     GW::UI::Frame* mission_map_frame = nullptr;
 
         struct FogGeometry {
-        struct GameVertex {
-            float x, y, z;
-            DWORD color;
-        };
 
         static constexpr int MAX_VERTS = 1 << 19; // 512k — fog is smaller than static geo
         GameVertex verts[MAX_VERTS];
@@ -772,10 +769,7 @@ namespace {
         return true;
     }
     
-    struct GameVertex {
-        float x, y, z;
-        DWORD color;
-    }; // D3DFVF_XYZ | D3DFVF_DIFFUSE
+
 
     // -----------------------------------------------------------------------
     // Vertex buffer types and arena
@@ -940,11 +934,11 @@ namespace {
             dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
 
             // Static (rebuilt on map change only)
-            if (static_map_geo.inaccessible_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_count / 3, static_map_geo.verts + static_map_geo.inaccessible_start, sizeof(StaticMapGeometry::GameVertex));
-            if (static_map_geo.border_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.border_count / 3, static_map_geo.verts + static_map_geo.border_start, sizeof(StaticMapGeometry::GameVertex));
+            if (static_map_geo.inaccessible_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_count / 3, static_map_geo.verts + static_map_geo.inaccessible_start, sizeof(*static_map_geo.verts));
+            if (static_map_geo.border_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.border_count / 3, static_map_geo.verts + static_map_geo.border_start, sizeof(*static_map_geo.verts));
 
             // Static fog (rebuilt when player moves)
-            if (fog_geo.vert_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.vert_count / 3, fog_geo.verts, sizeof(FogGeometry::GameVertex));
+            if (fog_geo.vert_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.vert_count / 3, fog_geo.verts, sizeof(GameVertex));
 
             // Compass Circle
             const auto player = GW::Agents::GetControlledCharacter();
@@ -966,8 +960,8 @@ namespace {
         if (vb.line_count || vb.enemy_count) {
             dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
-            if (vb.line_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.line_count / 3, vb.screen_arena + vb.line_start, sizeof(VertexBuffers::Vertex));
-            if (vb.enemy_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.enemy_count / 3, vb.screen_arena + vb.enemy_start, sizeof(VertexBuffers::Vertex));
+            if (vb.line_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.line_count / 3, vb.screen_arena + vb.line_start, sizeof(*vb.screen_arena));
+            if (vb.enemy_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.enemy_count / 3, vb.screen_arena + vb.enemy_start, sizeof(*vb.screen_arena));
         }
 
         dx_device->SetFVF(oldFVF);
@@ -1033,26 +1027,9 @@ namespace {
         return 12;
     }
 
-    // Game-coord thick line (XYZ). half_thickness is in game units.
-    int EnqueueThickLineGame(GameVertex* v,  float x1, float y1, float x2, float y2, float half_thickness, DWORD color)
-    {
-        const float dx = x2 - x1, dy = y2 - y1;
-        const float len_sq = dx * dx + dy * dy;
-        if (len_sq < 0.000001f) return 0;
 
-        const float inv_len = 1.0f / sqrtf(len_sq);
-        const float nx = -dy * inv_len, ny = dx * inv_len;
-        const float ix = nx * half_thickness, iy = ny * half_thickness;
 
-        if (!v) return 0;
-        v[0] = {x1 + ix, y1 + iy, 0.f, color};
-        v[1] = {x1 - ix, y1 - iy, 0.f, color};
-        v[2] = {x2 - ix, y2 - iy, 0.f, color};
-        v[3] = {x1 + ix, y1 + iy, 0.f, color};
-        v[4] = {x2 - ix, y2 - iy, 0.f, color};
-        v[5] = {x2 + ix, y2 + iy, 0.f, color};
-        return 6;
-    }
+
 
     // Game-coord axis-aligned quad (XYZ).
     int EnqueueGameQuad(VertexBuffers& vb, int& out_count, float x0, float y0, float x1, float y1, DWORD color)
@@ -1182,85 +1159,45 @@ namespace {
     void BuildFogGeometry()
     {
         fog_geo.vert_count = 0;
-
         if (!explored_cells || !cached_walkable_grid) return;
         const DWORD FOG_UNEXPLORED = (DWORD)vq_color_fog_unexplored;
         const DWORD FRONTIER_COLOR = (DWORD)vq_color_frontier;
-
-        constexpr float FRONTIER_HALF_THICKNESS = 1.5f;
-        const float ft = FRONTIER_HALF_THICKNESS * cached_px_to_game; // frontier thickness in game units
-
+        const float FRONTIER_HALF_THICKNESS = 1.f * cached_px_to_game;
         const float grid_origin_x = cached_grid_x0 * BORDER_CELL_SIZE;
         const float grid_origin_y = cached_grid_y0 * BORDER_CELL_SIZE;
 
-        // Inline helper — writes a horizontal frontier edge (normal is along Y axis)
-        // ny = +ft for south-facing edge, -ft for north-facing edge
-        const auto write_h_edge = [&](float x0, float y, float x1, float ny_sign) -> bool {
-            FogGeometry::GameVertex* v = fog_geo.Alloc(6);
-            if (!v) return false;
-            const float oy = ny_sign * ft;
-            v[0] = {x0, y - oy, 0.f, FRONTIER_COLOR};
-            v[1] = {x0, y + oy, 0.f, FRONTIER_COLOR};
-            v[2] = {x1, y + oy, 0.f, FRONTIER_COLOR};
-            v[3] = {x0, y - oy, 0.f, FRONTIER_COLOR};
-            v[4] = {x1, y + oy, 0.f, FRONTIER_COLOR};
-            v[5] = {x1, y - oy, 0.f, FRONTIER_COLOR};
+        auto v = fog_geo.verts;
+
+        const auto alloc = [&](int n) -> bool {
+            if (fog_geo.vert_count + n > FogGeometry::MAX_VERTS) return false;
+            fog_geo.vert_count += n;
+            v += n;
             return true;
         };
-
-        // Inline helper — writes a vertical frontier edge (normal is along X axis)
-        const auto write_v_edge = [&](float x, float y0, float y1, float nx_sign) -> bool {
-            FogGeometry::GameVertex* v = fog_geo.Alloc(6);
-            if (!v) return false;
-            const float ox = nx_sign * ft;
-            v[0] = {x - ox, y0, 0.f, FRONTIER_COLOR};
-            v[1] = {x + ox, y0, 0.f, FRONTIER_COLOR};
-            v[2] = {x + ox, y1, 0.f, FRONTIER_COLOR};
-            v[3] = {x - ox, y0, 0.f, FRONTIER_COLOR};
-            v[4] = {x + ox, y1, 0.f, FRONTIER_COLOR};
-            v[5] = {x - ox, y1, 0.f, FRONTIER_COLOR};
-            return true;
+        const auto enqueue = [&](float x1, float y1, float x2, float y2) -> bool {
+            int n = EnqueueLine(v, x1, y1, x2, y2, FRONTIER_HALF_THICKNESS, FRONTIER_COLOR);
+            return alloc(n);
         };
 
         for (int gy = 0; gy < cached_grid_h; gy++) {
             const float y0 = grid_origin_y + gy * BORDER_CELL_SIZE;
             const float y1 = y0 + BORDER_CELL_SIZE;
             const int row_base = gy * cached_grid_w;
-
             for (int gx = 0; gx < cached_grid_w; gx++) {
                 const int idx = row_base + gx;
                 if (!cached_walkable_grid[idx]) continue;
-                if (explored_cells && explored_cells[idx]) continue;
-
+                if (explored_cells[idx]) continue;
                 const float x0 = grid_origin_x + gx * BORDER_CELL_SIZE;
                 const float x1 = x0 + BORDER_CELL_SIZE;
 
                 // Unexplored fog quad
-                FogGeometry::GameVertex* v = fog_geo.Alloc(6);
-                if (!v) return;
-                v[0] = {x0, y0, 0.f, FOG_UNEXPLORED};
-                v[1] = {x1, y0, 0.f, FOG_UNEXPLORED};
-                v[2] = {x1, y1, 0.f, FOG_UNEXPLORED};
-                v[3] = {x0, y0, 0.f, FOG_UNEXPLORED};
-                v[4] = {x1, y1, 0.f, FOG_UNEXPLORED};
-                v[5] = {x0, y1, 0.f, FOG_UNEXPLORED};
+                if (fog_geo.vert_count + 6 > FogGeometry::MAX_VERTS) return;
+                if (!alloc(EnqueueQuad(v, x0, y0, x1, y1, FOG_UNEXPLORED))) return;
 
-
-                // North edge (y0, normal faces -Y)
-                if (gy > 0 && IsFrontierEdge(row_base - cached_grid_w + gx))
-                    if (!write_h_edge(x0, y0, x1, -1.f)) return;
-
-                // South edge (y1, normal faces +Y)
-                if (gy < cached_grid_h - 1 && IsFrontierEdge(row_base + cached_grid_w + gx))
-                    if (!write_h_edge(x0, y1, x1, +1.f)) return;
-
-                // West edge (x0, normal faces -X)
-                if (gx > 0 && IsFrontierEdge(row_base + gx - 1))
-                    if (!write_v_edge(x0, y0, y1, -1.f)) return;
-
-                // East edge (x1, normal faces +X)
-                if (gx < cached_grid_w - 1 && IsFrontierEdge(row_base + gx + 1))
-                    if (!write_v_edge(x1, y0, y1, +1.f)) return;
+                if (gy > 0 && IsFrontierEdge(row_base - cached_grid_w + gx) && !enqueue(x0, y0, x1, y0)) return;
+                if (gy < cached_grid_h && IsFrontierEdge(row_base + cached_grid_w + gx) && !enqueue(x0, y1, x1, y1)) return;
+                if (gx > 0 && IsFrontierEdge(row_base + gx - 1) && !enqueue(x0, y0, x0, y1)) return;
+                if (gx < cached_grid_w && IsFrontierEdge(row_base + gx + 1) && !enqueue(x1, y0, x1, y1)) return;
             }
         }
     }
@@ -1276,7 +1213,7 @@ namespace {
         for (int i = 1; i <= COMPASS_CIRCLE_SEGMENTS; i++) {
             const float a = static_cast<float>(i) / COMPASS_CIRCLE_SEGMENTS * TWO_PI;
             const GW::Vec2f cur = {COMPASS_RANGE * cosf(a), COMPASS_RANGE * sinf(a)};
-            compass_circle.vert_count += EnqueueThickLineGame(compass_circle.verts + compass_circle.vert_count, prev.x, prev.y, cur.x, cur.y, game_thickness, vq_color_compass);
+            compass_circle.vert_count += EnqueueLine(compass_circle.verts + compass_circle.vert_count, prev.x, prev.y, cur.x, cur.y, game_thickness, vq_color_compass);
             prev = cur;
         }
     }
