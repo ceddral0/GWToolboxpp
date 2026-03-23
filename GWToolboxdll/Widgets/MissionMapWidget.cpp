@@ -15,6 +15,7 @@
 #include <Widgets/Minimap/Minimap.h>
 #include <Widgets/MissionMapWidget.h>
 #include <Widgets/WorldMapWidget.h>
+#include <Utils/ToolboxUtils.h>
 
 namespace {
     bool draw_all_terrain_lines = false;
@@ -479,10 +480,8 @@ namespace {
             tracked_enemies.clear();
             tracked_enemies_map_id = map_id;
             tracked_enemies_instance_type = instance_type;
-            if (nav_active) StopNavigating();
+            
         }
-
-        if (instance_type != GW::Constants::InstanceType::Explorable) return;
 
         const auto player = GW::Agents::GetControlledCharacter();
         if (!player) return;
@@ -773,14 +772,16 @@ namespace {
         return true;
     }
     
+    struct GameVertex {
+        float x, y, z;
+        DWORD color;
+    }; // D3DFVF_XYZ | D3DFVF_DIFFUSE
+
     // -----------------------------------------------------------------------
     // Vertex buffer types and arena
     // -----------------------------------------------------------------------
     struct VertexBuffers {
-        struct GameVertex {
-            float x, y, z;
-            DWORD color;
-        }; // D3DFVF_XYZ | D3DFVF_DIFFUSE
+
         struct Vertex {
             float x, y, z, w;
             DWORD color;
@@ -824,6 +825,14 @@ namespace {
             return ptr;
         }
     };
+
+        // Static cached circle — built once per map/zoom change, centred on game origin
+    constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
+    constexpr float COMPASS_CIRCLE_THICKNESS_PX = 0.5f;
+    struct CompassCircleGeo {
+        GameVertex verts[COMPASS_CIRCLE_SEGMENTS * 6]; // 64 segments * 6 verts each
+        int vert_count = 0;
+    } compass_circle;
 
     // -----------------------------------------------------------------------
     // DrawEnemyCountLabel — ImGui overlay showing VQ kill counts
@@ -874,7 +883,8 @@ namespace {
     // -----------------------------------------------------------------------
     void SubmitVertexBuffers(IDirect3DDevice9* dx_device, const VertexBuffers& vb)
     {
-        if (!vb.Any()) return;
+        const bool in_explorable = GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
+        if (!show_vq_overlay && in_explorable) return;
 
         DWORD oldAlphaBlend, oldSrcBlend, oldDestBlend, oldScissorTest, oldFVF, oldLighting, oldZEnable;
         D3DMATRIX oldWorld, oldView, oldProj;
@@ -907,19 +917,21 @@ namespace {
         dx_device->SetScissorRect(&scissorRect);
 
         // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
-        const bool in_explorable = GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
-        if ((static_map_geo.Any() || fog_geo.vert_count || vb.fog_count) && show_vq_overlay && in_explorable) {
+
+        bool has_vertices_to_draw = static_map_geo.Any() || fog_geo.vert_count || compass_circle.vert_count;
+        
+        if (has_vertices_to_draw) {
             D3DVIEWPORT9 vp;
             dx_device->GetViewport(&vp);
             const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
 
             // clang-format off
-        const D3DMATRIX gameToScreen = {{
-            g2s.ax, g2s.ay, 0.f, 0.f,
-            g2s.bx, g2s.by, 0.f, 0.f,
-            0.f,    0.f,    1.f, 0.f,
-            g2s.ox, g2s.oy, 0.f, 1.f
-        }};
+            const D3DMATRIX gameToScreen = {{
+                g2s.ax, g2s.ay, 0.f, 0.f,
+                g2s.bx, g2s.by, 0.f, 0.f,
+                0.f,    0.f,    1.f, 0.f,
+                g2s.ox, g2s.oy, 0.f, 1.f
+            }};
             // clang-format on
 
             dx_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE);
@@ -934,8 +946,20 @@ namespace {
             // Static fog (rebuilt when player moves)
             if (fog_geo.vert_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.vert_count / 3, fog_geo.verts, sizeof(FogGeometry::GameVertex));
 
-            // Dynamic per-frame game-coord geometry (compass circle)
-            if (vb.fog_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.fog_count / 3, vb.game_arena + vb.fog_start, sizeof(VertexBuffers::GameVertex));
+            // Compass Circle
+            const auto player = GW::Agents::GetControlledCharacter();
+            if (player && compass_circle.vert_count) {
+                D3DMATRIX compassMatrix = gameToScreen;
+                const float px = player->pos.x, py = player->pos.y;
+                compassMatrix._41 = g2s.ox + px * g2s.ax + py * g2s.bx; // screen x of player
+                compassMatrix._42 = g2s.oy + px * g2s.ay + py * g2s.by; // screen y of player
+                dx_device->SetTransform(D3DTS_WORLD, &compassMatrix);
+                dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, compass_circle.vert_count / 3, compass_circle.verts, sizeof(GameVertex));
+                // Restore
+                dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
+            }
+
+
         }
 
         // Pass 2: Screen-space geometry — XYZRHW bypasses transform pipeline
@@ -1010,7 +1034,7 @@ namespace {
     }
 
     // Game-coord thick line (XYZ). half_thickness is in game units.
-    int EnqueueThickLineGame(VertexBuffers& vb, int& out_count, float x1, float y1, float x2, float y2, float half_thickness, DWORD color)
+    int EnqueueThickLineGame(GameVertex* v,  float x1, float y1, float x2, float y2, float half_thickness, DWORD color)
     {
         const float dx = x2 - x1, dy = y2 - y1;
         const float len_sq = dx * dx + dy * dy;
@@ -1020,7 +1044,6 @@ namespace {
         const float nx = -dy * inv_len, ny = dx * inv_len;
         const float ix = nx * half_thickness, iy = ny * half_thickness;
 
-        VertexBuffers::GameVertex* v = vb.GameAlloc(6);
         if (!v) return 0;
         v[0] = {x1 + ix, y1 + iy, 0.f, color};
         v[1] = {x1 - ix, y1 - iy, 0.f, color};
@@ -1028,14 +1051,13 @@ namespace {
         v[3] = {x1 + ix, y1 + iy, 0.f, color};
         v[4] = {x2 - ix, y2 - iy, 0.f, color};
         v[5] = {x2 + ix, y2 + iy, 0.f, color};
-        out_count += 6;
         return 6;
     }
 
     // Game-coord axis-aligned quad (XYZ).
     int EnqueueGameQuad(VertexBuffers& vb, int& out_count, float x0, float y0, float x1, float y1, DWORD color)
     {
-        VertexBuffers::GameVertex* v = vb.GameAlloc(6);
+        auto v = vb.GameAlloc(6);
         if (!v) return 0;
         v[0] = {x0, y0, 0.f, color};
         v[1] = {x1, y0, 0.f, color};
@@ -1062,23 +1084,6 @@ namespace {
         return 6;
     }
 
-    // Screen-space radial halo fading from center_color to transparent at edge.
-    int EnqueueHalo(VertexBuffers& vb, int& out_count, float cx, float cy, float radius, DWORD center_color)
-    {
-        constexpr int HALO_SEGMENTS = 12;
-        VertexBuffers::Vertex* v = vb.ScreenAlloc(HALO_SEGMENTS * 3);
-        if (!v) return 0;
-        const DWORD edge_color = center_color & 0x00FFFFFF;
-        for (int i = 0; i < HALO_SEGMENTS; i++) {
-            const float a1 = static_cast<float>(i) / HALO_SEGMENTS * TWO_PI;
-            const float a2 = static_cast<float>(i + 1) / HALO_SEGMENTS * TWO_PI;
-            v[i * 3 + 0] = {cx, cy, 0.f, 1.f, center_color};
-            v[i * 3 + 1] = {cx + radius * cosf(a1), cy + radius * sinf(a1), 0.f, 1.f, edge_color};
-            v[i * 3 + 2] = {cx + radius * cosf(a2), cy + radius * sinf(a2), 0.f, 1.f, edge_color};
-        }
-        out_count += HALO_SEGMENTS * 3;
-        return HALO_SEGMENTS * 3;
-    }
 
     // Screen-space velocity arrow for a stale enemy marker.
     // Returns 0 if the enemy is stationary or the projection fails.
@@ -1131,7 +1136,6 @@ namespace {
     {
         constexpr float MARKER_SIZE = 9.0f;
         constexpr float OUTLINE_SIZE = MARKER_SIZE + 2.0f;
-        constexpr float HALO_SIZE = MARKER_SIZE + 8.0f;
         const DWORD COLOR_OUTLINE = (DWORD)vq_color_enemy_outline;
         const DWORD COLOR_ALIVE = (DWORD)vq_color_enemy_alive;
         const DWORD COLOR_STALE = (DWORD)vq_color_enemy_stale;
@@ -1141,11 +1145,9 @@ namespace {
 
         const bool is_stale = enemy.state == EnemyState::Stale;
         const DWORD color = is_stale ? COLOR_STALE : COLOR_ALIVE;
-        const DWORD halo_color = is_stale ? D3DCOLOR_ARGB(60, 255, 180, 50) : D3DCOLOR_ARGB(80, 70, 130, 255);
         const float cx = screen_pos.x, cy = screen_pos.y;
 
         int added = 0;
-        added += EnqueueHalo(vb, out_count, cx, cy, HALO_SIZE, halo_color);
         added += EnqueueDiamond(vb, out_count, cx, cy, OUTLINE_SIZE, COLOR_OUTLINE);
         added += EnqueueDiamond(vb, out_count, cx, cy, MARKER_SIZE, color);
         if (is_stale) added += EnqueueVelocityArrow(vb, out_count, cx, cy, enemy);
@@ -1157,15 +1159,10 @@ namespace {
     // -----------------------------------------------------------------------
     void EnqueueEnemyMarkers(VertexBuffers& vb)
     {
-        if (!show_vq_overlay) return;
-        if (GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable) return;
 
         // Stale first (drawn below alive)
         for (const auto& [agent_id, enemy] : tracked_enemies) {
-            if (enemy.state == EnemyState::Stale) EnqueueEnemyMarker(vb, vb.enemy_count, enemy);
-        }
-        for (const auto& [agent_id, enemy] : tracked_enemies) {
-            if (enemy.state == EnemyState::Alive) EnqueueEnemyMarker(vb, vb.enemy_count, enemy);
+            EnqueueEnemyMarker(vb, vb.enemy_count, enemy);
         }
     }
 
@@ -1180,6 +1177,7 @@ namespace {
 
     int last_fog_player_cx = INT_MIN;
     int last_fog_player_cy = INT_MIN;
+    VertexBuffers vb;
 
     void BuildFogGeometry()
     {
@@ -1267,6 +1265,99 @@ namespace {
         }
     }
 
+
+
+    void RebuildCompassCircle()
+    {
+        compass_circle.vert_count = 0;
+        const float game_thickness = COMPASS_CIRCLE_THICKNESS_PX * cached_px_to_game;
+
+        GW::Vec2f prev = {COMPASS_RANGE, 0.f};
+        for (int i = 1; i <= COMPASS_CIRCLE_SEGMENTS; i++) {
+            const float a = static_cast<float>(i) / COMPASS_CIRCLE_SEGMENTS * TWO_PI;
+            const GW::Vec2f cur = {COMPASS_RANGE * cosf(a), COMPASS_RANGE * sinf(a)};
+            compass_circle.vert_count += EnqueueThickLineGame(compass_circle.verts + compass_circle.vert_count, prev.x, prev.y, cur.x, cur.y, game_thickness, vq_color_compass);
+            prev = cur;
+        }
+    }
+
+    void DrawVanquishToggleButton() {
+        constexpr float PADDING = 4.0f;
+        const float btn_size = ImGui::GetTextLineHeight() + PADDING * 2;
+        const ImVec2 btn_pos(mission_map_top_left.x + PADDING, mission_map_bottom_right.y - btn_size - PADDING);
+
+        ImGui::SetNextWindowPos(btn_pos);
+        ImGui::SetNextWindowSize({0, 0});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {2, 2});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, {0, 0});
+        if (ImGui::Begin("##vq_toggle", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+            if (show_vq_overlay) {
+                if (ImGui::Button(ICON_FA_SKULL "##vq_off")) show_vq_overlay = false;
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("VQ overlay active. Click to hide.");
+            }
+            else {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+                if (ImGui::Button(ICON_FA_SKULL "##vq_on")) show_vq_overlay = true;
+                ImGui::PopStyleColor();
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("VQ overlay hidden. Click to show.");
+            }
+        }
+        ImGui::End();
+        ImGui::PopStyleVar(2);
+    }
+
+    void DrawExplorable(IDirect3DDevice9* dx_device,GW::Constants::MapID map_id) {
+        if (show_vq_overlay) {
+            const bool map_changed = map_id != border_map_id;
+            const bool zoom_changed = mission_map_zoom != border_cached_zoom;
+
+            if (map_changed || zoom_changed) {
+                border_cached_zoom = mission_map_zoom;
+                BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
+                BuildFogGeometry();
+                RebuildCompassCircle();
+                if (map_changed) {
+                    border_map_id = map_id;
+                    last_fog_player_cx = INT_MIN;
+                    last_fog_player_cy = INT_MIN;
+                    RebuildMapBorder(); // rebuilds walkable grid + border segments
+                }
+
+            }
+
+            // Fog overlay + frontier — rebuilt only when player cell changes
+            {
+                const auto player = GW::Agents::GetControlledCharacter();
+                if (player) {
+                    const int player_cx = static_cast<int>(floorf(player->pos.x / BORDER_CELL_SIZE));
+                    const int player_cy = static_cast<int>(floorf(player->pos.y / BORDER_CELL_SIZE));
+
+                    if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
+                        // Don't cache position until explored_cells is ready,
+                        // so we keep rebuilding until exploration data arrives.
+                        if (explored_cells) {
+                            last_fog_player_cx = player_cx;
+                            last_fog_player_cy = player_cy;
+                        }
+                        BuildFogGeometry();
+                    }
+                }
+            }
+            // -----------------------------------------------------------------------
+            // Enemy markers
+            // -----------------------------------------------------------------------
+            vb.enemy_start = vb.screen_arena_pos;
+            EnqueueEnemyMarkers(vb);
+            SubmitVertexBuffers(dx_device, vb);
+            DrawEnemyCountLabel();
+        }
+        DrawVanquishToggleButton();
+    }
+    void DrawOutpost(IDirect3DDevice9*, GW::Constants::MapID)
+    {
+        // Stub
+    }
+
     // -----------------------------------------------------------------------
     // Draw — builds geometry into VertexBuffers, then submits
     // -----------------------------------------------------------------------
@@ -1276,8 +1367,6 @@ namespace {
         if (!InitializeMissionMapParameters()) return;
         g2s.Rebuild();
         if (!g2s.valid) return;
-
-        static VertexBuffers vb;
         vb.Reset();
 
 
@@ -1306,107 +1395,14 @@ namespace {
         // -----------------------------------------------------------------------
         // VQ overlay — raw game coords, no per-vertex projection
         // -----------------------------------------------------------------------
-        const bool in_explorable = GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
+        const bool in_explorable = ToolboxUtils::IsExplorable();
 
-        if (show_vq_overlay && in_explorable) {
-            const bool map_changed = map_id != border_map_id;
-            const bool zoom_changed = mission_map_zoom != border_cached_zoom;
-
-            if (map_changed || zoom_changed) {
-                if (map_changed) {
-                    border_map_id = map_id;
-                    last_fog_player_cx = INT_MIN;
-                    last_fog_player_cy = INT_MIN;
-                    RebuildMapBorder(); // rebuilds walkable grid + border segments
-                }
-                border_cached_zoom = mission_map_zoom;
-                BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
-                BuildFogGeometry();
-            }
-
-            // Compass range circle (per-frame, goes into vb game arena)
-            vb.fog_start = vb.game_arena_pos;
-            {
-                const auto player = GW::Agents::GetControlledCharacter();
-                if (player) {
-                    constexpr int CIRCLE_SEGMENTS = 64;
-
-                    const DWORD CIRCLE_COLOR = (DWORD)vq_color_compass;
-
-                    constexpr float CIRCLE_THICKNESS = 0.5f;
-                    const float px = player->pos.x, py = player->pos.y;
-                    const float game_thickness = CIRCLE_THICKNESS * cached_px_to_game;
-
-                    // Precompute all points — each trig result used twice (end of seg N, start of seg N+1)
-                    GW::Vec2f pts[CIRCLE_SEGMENTS + 1];
-                    for (int i = 0; i <= CIRCLE_SEGMENTS; i++) {
-                        const float a = static_cast<float>(i) / CIRCLE_SEGMENTS * TWO_PI;
-                        pts[i] = {px + COMPASS_RANGE * cosf(a), py + COMPASS_RANGE * sinf(a)};
-                    }
-                    // pts[0] == pts[CIRCLE_SEGMENTS] so the circle closes cleanly
-
-                    for (int i = 0; i < CIRCLE_SEGMENTS; i++) {
-                        EnqueueThickLineGame(vb, vb.fog_count, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, game_thickness, CIRCLE_COLOR);
-                    }
-                }
-            }
-
-            // Fog overlay + frontier — rebuilt only when player cell changes
-            {
-                const auto player = GW::Agents::GetControlledCharacter();
-                if (player) {
-                    const int player_cx = static_cast<int>(floorf(player->pos.x / BORDER_CELL_SIZE));
-                    const int player_cy = static_cast<int>(floorf(player->pos.y / BORDER_CELL_SIZE));
-
-                    if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
-                        // Don't cache position until explored_cells is ready,
-                        // so we keep rebuilding until exploration data arrives.
-                        if (explored_cells) {
-                            last_fog_player_cx = player_cx;
-                            last_fog_player_cy = player_cy;
-                        }
-                        BuildFogGeometry();
-                    }
-                }
-            }
-        }
-
-        // -----------------------------------------------------------------------
-        // Enemy markers
-        // -----------------------------------------------------------------------
-        vb.enemy_start = vb.screen_arena_pos;
-        EnqueueEnemyMarkers(vb);
-
-        // -----------------------------------------------------------------------
-        // VQ toggle button (ImGui)
-        // -----------------------------------------------------------------------
         if (in_explorable) {
-            constexpr float PADDING = 4.0f;
-            const float btn_size = ImGui::GetTextLineHeight() + PADDING * 2;
-            const ImVec2 btn_pos(mission_map_top_left.x + PADDING, mission_map_bottom_right.y - btn_size - PADDING);
-
-            ImGui::SetNextWindowPos(btn_pos);
-            ImGui::SetNextWindowSize({0, 0});
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {2, 2});
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, {0, 0});
-            if (ImGui::Begin("##vq_toggle", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
-                if (show_vq_overlay) {
-                    if (ImGui::Button(ICON_FA_SKULL "##vq_off")) show_vq_overlay = false;
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("VQ overlay active. Click to hide.");
-                }
-                else {
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
-                    if (ImGui::Button(ICON_FA_SKULL "##vq_on")) show_vq_overlay = true;
-                    ImGui::PopStyleColor();
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("VQ overlay hidden. Click to show.");
-                }
-            }
-            ImGui::End();
-            ImGui::PopStyleVar(2);
+            DrawExplorable(dx_device, map_id);
         }
-
-        SubmitVertexBuffers(dx_device, vb);
-        DrawEnemyCountLabel();
+        else {
+            DrawOutpost(dx_device, map_id);
+        }
     }
 } // namespace
 
@@ -1446,11 +1442,15 @@ void MissionMapWidget::SaveSettings(ToolboxIni* ini)
 
 void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
 {
-    if (show_vq_overlay) {
-        // Throttle tracking updates — no need to run every render frame.
-        // Enemy positions update at ~10Hz in GW anyway.
+    if (visible) ::Draw(dx_device);
+    HookMissionMapFrame();
+}
+void MissionMapWidget::Update(float)
+{
+    if (ToolboxUtils::IsExplorable()) {
         static DWORD last_tracking_tick = 0;
         const DWORD now = GetTickCount();
+
         if (now - last_tracking_tick >= 100) { // 10Hz
             last_tracking_tick = now;
             UpdateEnemyTracking();
@@ -1458,9 +1458,10 @@ void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
                 UpdateExploration(player->pos);
             }
         }
+    } else {
+        if (nav_active) StopNavigating();
     }
-    if (visible) ::Draw(dx_device);
-    HookMissionMapFrame();
+
 }
 
 void MissionMapWidget::DrawSettingsInternal()
@@ -1480,7 +1481,7 @@ void MissionMapWidget::DrawSettingsInternal()
         static_changed |= Colors::DrawSettingHueWheel("Map border", &vq_color_border);
         fog_changed |= Colors::DrawSettingHueWheel("Unexplored fog", &vq_color_fog_unexplored);
         fog_changed |= Colors::DrawSettingHueWheel("Frontier edge", &vq_color_frontier);
-        Colors::DrawSettingHueWheel("Compass range", &vq_color_compass);
+        bool rebuild_compass = Colors::DrawSettingHueWheel("Compass range", &vq_color_compass);
         Colors::DrawSettingHueWheel("Enemy (alive)", &vq_color_enemy_alive);
         Colors::DrawSettingHueWheel("Enemy (last known position)", &vq_color_enemy_stale);
         Colors::DrawSettingHueWheel("Enemy outline", &vq_color_enemy_outline);
@@ -1488,6 +1489,7 @@ void MissionMapWidget::DrawSettingsInternal()
 
         if (static_changed) BuildStaticMapGeometry();
         if (fog_changed) BuildFogGeometry();
+        if (rebuild_compass) RebuildCompassCircle();
     }
 }
 
