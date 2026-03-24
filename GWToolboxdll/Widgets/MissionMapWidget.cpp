@@ -53,6 +53,8 @@ namespace {
     constexpr float COMPASS_RANGE = GW::Constants::Range::Compass;
     constexpr float STALE_CHECK_RANGE = COMPASS_RANGE * 0.9f;
 
+    bool should_draw_vq_overlay = false;
+
     // Pixel-to-game-unit scale — converts pixel thickness to game units
     float cached_px_to_game = 1.f;
 
@@ -77,6 +79,25 @@ namespace {
             v[3] = top;
             v[4] = bot;
             v[5] = left; // triangle 2
+        }
+    };
+    struct VelocityArrow {
+        GameVertex v[3];
+
+        VelocityArrow(const GW::GamePos& pos, const GW::Vec2f& velocity, float length, float half_width, DWORD color)
+        {
+            const float vlen_sq = velocity.x * velocity.x + velocity.y * velocity.y;
+            if (vlen_sq < 1.0f) return;
+            const float vlen = sqrtf(vlen_sq);
+            const float dx = velocity.x / vlen;
+            const float dy = velocity.y / vlen;
+
+            const GW::Vec2f tip{pos.x + dx * length, pos.y + dy * length};
+            const float nx = -dy, ny = dx;
+
+            v[0] = {tip.x, tip.y, color};
+            v[1] = {pos.x + nx * half_width, pos.y + ny * half_width, color};
+            v[2] = {pos.x - nx * half_width, pos.y - ny * half_width, color};
         }
     };
 
@@ -161,11 +182,22 @@ namespace {
     GW::Constants::MapID explored_map_id = static_cast<GW::Constants::MapID>(0);
     GW::Constants::InstanceType explored_instance_type = GW::Constants::InstanceType::Loading;
 
-        struct BorderSegment {
-        GW::GamePos p1, p2;
+    struct BorderSegment {
+        GW::Vec2f p1, p2;
     };
 
     std::vector<BorderSegment> cached_border_segments;
+
+    // -----------------------------------------------------------------------
+    // Vertex buffer types and arena
+    // -----------------------------------------------------------------------
+    std::vector<Diamond> enemy_vertex_buffer;
+    std::vector<VelocityArrow> enemy_velocity_arrow_buffer;
+
+    // Static cached circle — built once per map/zoom change, centred on game origin
+    constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
+    constexpr float COMPASS_CIRCLE_THICKNESS_PX = 0.5f;
+    Circle compass_circle;
 
     bool* cached_walkable_grid = nullptr;
     int cached_walkable_grid_size = 0;
@@ -409,10 +441,10 @@ namespace {
                 const float x1 = x0 + EXPLORE_CELL_SIZE;
                 const float y1 = y0 + EXPLORE_CELL_SIZE;
 
-                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy - 1)) cached_border_segments.push_back({{x0, y0, 0}, {x1, y0, 0}});
-                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy + 1)) cached_border_segments.push_back({{x0, y1, 0}, {x1, y1, 0}});
-                if (!IsGridCellWalkable(cached_grid_x0 + cx - 1, cached_grid_y0 + cy)) cached_border_segments.push_back({{x0, y0, 0}, {x0, y1, 0}});
-                if (!IsGridCellWalkable(cached_grid_x0 + cx + 1, cached_grid_y0 + cy)) cached_border_segments.push_back({{x1, y0, 0}, {x1, y1, 0}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy - 1)) cached_border_segments.push_back({{x0, y0}, {x1, y0}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx, cached_grid_y0 + cy + 1)) cached_border_segments.push_back({{x0, y1}, {x1, y1}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx - 1, cached_grid_y0 + cy)) cached_border_segments.push_back({{x0, y0}, {x0, y1}});
+                if (!IsGridCellWalkable(cached_grid_x0 + cx + 1, cached_grid_y0 + cy)) cached_border_segments.push_back({{x1, y0}, {x1, y1}});
             }
         }
         BuildStaticMapGeometry();
@@ -514,6 +546,26 @@ namespace {
         SetNavTarget(best_pos);
     }
 
+        void EnqueueEnemyMarker(const TrackedEnemy& enemy)
+    {
+        if (enemy.state == EnemyState::NotApplicable) return;
+        const DWORD color = enemy.state == EnemyState::Stale ? vq_color_enemy_stale : vq_color_enemy_alive;
+        const float diamond_radius = 9.0f * cached_px_to_game;
+        const float diamond_outline_radius = diamond_radius + 1.0f * cached_px_to_game;
+
+        enemy_vertex_buffer.push_back(Diamond(enemy.pos, diamond_outline_radius, vq_color_enemy_outline));
+        enemy_vertex_buffer.push_back(Diamond(enemy.pos, diamond_radius, color));
+
+        if (enemy.state == EnemyState::Stale) {
+            const float arrow_length = diamond_radius * 3.0f;
+            const float arrow_width = diamond_radius - 2.0f * cached_px_to_game;
+            const float arrow_outline_length = arrow_length + 1.0f * cached_px_to_game;
+            const float arrow_outline_width = arrow_width + 1.0f * cached_px_to_game;
+            enemy_velocity_arrow_buffer.push_back(VelocityArrow(enemy.pos, enemy.velocity, arrow_outline_length, arrow_outline_width, vq_color_enemy_outline));
+            enemy_velocity_arrow_buffer.push_back(VelocityArrow(enemy.pos, enemy.velocity, arrow_length, arrow_width, color));
+        }
+    }
+
     constexpr float stale_range_sq = STALE_CHECK_RANGE * STALE_CHECK_RANGE;
     void UpdateEnemyTracking()
     {
@@ -582,6 +634,12 @@ namespace {
         }
 
         if (nav_active) NavigateToClosestEnemy();
+        enemy_vertex_buffer.clear();
+        enemy_velocity_arrow_buffer.clear();
+        // Stale first (drawn below alive)
+        for (size_t i = 0, len = highest_trackable_agent_id; i < len; i++) {
+            EnqueueEnemyMarker(tracked_enemies_by_agent_id[i]);
+        }
     }
 
     GW::Vec2f mission_map_top_left;
@@ -815,59 +873,7 @@ namespace {
     
 
 
-    // -----------------------------------------------------------------------
-    // Vertex buffer types and arena
-    // -----------------------------------------------------------------------
-    struct VertexBuffers {
 
-        struct Vertex {
-            float x, y, z, w;
-            DWORD color;
-        }; // D3DFVF_XYZRHW | D3DFVF_DIFFUSE
-
-        static constexpr int MAX_GAME_VERTICES = 1 << 20;   // ~20MB — fog + border
-        static constexpr int MAX_SCREEN_VERTICES = 1 << 18; // ~5MB  — lines + enemies
-
-        GameVertex game_arena[MAX_GAME_VERTICES];
-        Vertex screen_arena[MAX_SCREEN_VERTICES];
-
-        int game_arena_pos = 0;
-        int screen_arena_pos = 0;
-
-        int fog_start = 0, fog_count = 0;
-        int line_start = 0, line_count = 0;
-        int enemy_start = 0, enemy_count = 0;
-
-        void Reset()
-        {
-            game_arena_pos = screen_arena_pos = 0;
-            fog_count = line_count = enemy_count = 0;
-            fog_start = line_start = enemy_start = 0;
-        }
-
-        bool Any() const { return fog_count || line_count || enemy_count; }
-
-        GameVertex* GameAlloc(int count)
-        {
-            if (game_arena_pos + count > MAX_GAME_VERTICES) return nullptr;
-            GameVertex* ptr = game_arena + game_arena_pos;
-            game_arena_pos += count;
-            return ptr;
-        }
-
-        Vertex* ScreenAlloc(int count)
-        {
-            if (screen_arena_pos + count > MAX_SCREEN_VERTICES) return nullptr;
-            Vertex* ptr = screen_arena + screen_arena_pos;
-            screen_arena_pos += count;
-            return ptr;
-        }
-    };
-
-        // Static cached circle — built once per map/zoom change, centred on game origin
-    constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
-    constexpr float COMPASS_CIRCLE_THICKNESS_PX = 0.5f;
-    Circle compass_circle;
 
     // -----------------------------------------------------------------------
     // DrawEnemyCountLabel — ImGui overlay showing VQ kill counts
@@ -916,9 +922,9 @@ namespace {
     // -----------------------------------------------------------------------
     // SubmitVertexBuffers — D3D state setup, draw calls, and restore
     // -----------------------------------------------------------------------
-    void SubmitVertexBuffers(IDirect3DDevice9* dx_device, const VertexBuffers& vb)
+    void SubmitVertexBuffers(IDirect3DDevice9* dx_device)
     {
-        bool should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
+
 
         DWORD oldAlphaBlend, oldSrcBlend, oldDestBlend, oldScissorTest, oldFVF, oldLighting, oldZEnable;
         D3DMATRIX oldWorld, oldView, oldProj;
@@ -950,54 +956,43 @@ namespace {
         scissorRect.bottom = static_cast<LONG>(mission_map_bottom_right.y);
         dx_device->SetScissorRect(&scissorRect);
 
-        // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
+        D3DVIEWPORT9 vp;
+        dx_device->GetViewport(&vp);
+        const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
+        const D3DMATRIX gameToScreen = {{g2s.ax, g2s.ay, 0.f, 0.f, g2s.bx, g2s.by, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, g2s.ox, g2s.oy, 0.f, 1.f}};
 
-        bool has_vertices_to_draw = minimap_lines.size() || static_map_geo.inaccessible_quads.size() || static_map_geo.inaccessible_borders.size() || fog_geo.unexplored_quads.size() || fog_geo.frontier_lines.size();
+        dx_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE);
+        dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
+        dx_device->SetTransform(D3DTS_VIEW, &IDENTITY_MATRIX);
+        dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
 
-        if (has_vertices_to_draw) {
-            D3DVIEWPORT9 vp;
-            dx_device->GetViewport(&vp);
-            const D3DMATRIX ortho = MakeOrthoProjection(static_cast<float>(vp.Width), static_cast<float>(vp.Height));
-            const D3DMATRIX gameToScreen = {{g2s.ax, g2s.ay, 0.f, 0.f, g2s.bx, g2s.by, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, g2s.ox, g2s.oy, 0.f, 1.f}};
+        if (should_draw_vq_overlay) {
+            if (!static_map_geo.inaccessible_quads.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_quads.size() * 2, static_map_geo.inaccessible_quads.data(), sizeof(GameVertex));
 
-            dx_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE);
-            dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
-            dx_device->SetTransform(D3DTS_VIEW, &IDENTITY_MATRIX);
-            dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
+            if (!static_map_geo.inaccessible_borders.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_borders.size() * 2, static_map_geo.inaccessible_borders.data(), sizeof(GameVertex));
 
-            if (should_draw_vq_overlay) {
-                if (!static_map_geo.inaccessible_quads.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_quads.size() * 2, static_map_geo.inaccessible_quads.data(), sizeof(GameVertex));
+            if (!fog_geo.unexplored_quads.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.unexplored_quads.size() * 2, fog_geo.unexplored_quads.data(), sizeof(GameVertex));
 
-                if (!static_map_geo.inaccessible_borders.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_borders.size() * 2, static_map_geo.inaccessible_borders.data(), sizeof(GameVertex));
+            if (!fog_geo.frontier_lines.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.frontier_lines.size() * 2, fog_geo.frontier_lines.data(), sizeof(GameVertex));
 
-                if (!fog_geo.unexplored_quads.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.unexplored_quads.size() * 2, fog_geo.unexplored_quads.data(), sizeof(GameVertex));
+            if (!enemy_velocity_arrow_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_velocity_arrow_buffer.size(), enemy_velocity_arrow_buffer.data(), sizeof(GameVertex));
 
-                if (!fog_geo.frontier_lines.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.frontier_lines.size() * 2, fog_geo.frontier_lines.data(), sizeof(GameVertex));
+            if (!enemy_vertex_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_vertex_buffer.size() * 2, enemy_vertex_buffer.data(), sizeof(GameVertex));
 
-                if (!compass_circle.segments.empty()) {
-                    if (const auto* player = GW::Agents::GetControlledCharacter()) {
-                        D3DMATRIX compassMatrix = gameToScreen;
-                        const float px = player->pos.x, py = player->pos.y;
-                        compassMatrix._41 = g2s.ox + px * g2s.ax + py * g2s.bx;
-                        compassMatrix._42 = g2s.oy + px * g2s.ay + py * g2s.by;
-                        dx_device->SetTransform(D3DTS_WORLD, &compassMatrix);
-                        dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, compass_circle.segments.size() * 2, compass_circle.segments.data(), sizeof(GameVertex));
-                        dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
-                    }
+            if (!compass_circle.segments.empty()) {
+                if (const auto* player = GW::Agents::GetControlledCharacter()) {
+                    D3DMATRIX compassMatrix = gameToScreen;
+                    const float px = player->pos.x, py = player->pos.y;
+                    compassMatrix._41 = g2s.ox + px * g2s.ax + py * g2s.bx;
+                    compassMatrix._42 = g2s.oy + px * g2s.ay + py * g2s.by;
+                    dx_device->SetTransform(D3DTS_WORLD, &compassMatrix);
+                    dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, compass_circle.segments.size() * 2, compass_circle.segments.data(), sizeof(GameVertex));
+                    dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
                 }
             }
-
-            if (!minimap_lines.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, minimap_lines.size() * 2, minimap_lines.data(), sizeof(GameVertex));
-
         }
 
-        // Pass 2: Screen-space geometry — XYZRHW bypasses transform pipeline
-        if (vb.line_count || vb.enemy_count) {
-            dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
-
-            //if (vb.line_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.line_count / 3, vb.screen_arena + vb.line_start, sizeof(*vb.screen_arena));
-            if (vb.enemy_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.enemy_count / 3, vb.screen_arena + vb.enemy_start, sizeof(*vb.screen_arena));
-        }
+        if (!minimap_lines.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, minimap_lines.size() * 2, minimap_lines.data(), sizeof(GameVertex));
 
         dx_device->SetFVF(oldFVF);
         dx_device->SetTransform(D3DTS_WORLD, &oldWorld);
@@ -1011,105 +1006,6 @@ namespace {
         dx_device->SetRenderState(D3DRS_SCISSORTESTENABLE, oldScissorTest);
         dx_device->SetScissorRect(&oldScissorRect);
     }
-    // -----------------------------------------------------------------------
-    // Primitive enqueue functions — each writes directly into vb and returns
-    // the number of vertices added (0 if the arena was full).
-    // -----------------------------------------------------------------------
-
-    // Screen-space diamond (two triangles, 6 verts).
-    int EnqueueDiamond(VertexBuffers& vb, int& out_count, float cx, float cy, float size, DWORD color)
-    {
-        VertexBuffers::Vertex* v = vb.ScreenAlloc(6);
-        if (!v) return 0;
-        v[0] = {cx, cy - size, 0.f, 1.f, color};
-        v[1] = {cx + size, cy, 0.f, 1.f, color};
-        v[2] = {cx, cy + size, 0.f, 1.f, color};
-        v[3] = {cx, cy + size, 0.f, 1.f, color};
-        v[4] = {cx - size, cy, 0.f, 1.f, color};
-        v[5] = {cx, cy - size, 0.f, 1.f, color};
-        out_count += 6;
-        return 6;
-    }
-
-
-    // Screen-space velocity arrow for a stale enemy marker.
-    // Returns 0 if the enemy is stationary or the projection fails.
-    int EnqueueVelocityArrow(VertexBuffers& vb, int& out_count, float cx, float cy, const TrackedEnemy& enemy)
-    {
-        constexpr float MARKER_SIZE = 9.0f;
-        constexpr float ARROW_LENGTH = 28.0f;
-        constexpr float ARROW_HALF_WIDTH = 6.0f;
-        constexpr DWORD COLOR_ARROW = D3DCOLOR_ARGB(240, 255, 220, 50);
-        constexpr DWORD COLOR_ARROW_OUTLINE = D3DCOLOR_ARGB(240, 0, 0, 0);
-
-        const float vlen_sq = enemy.velocity.x * enemy.velocity.x + enemy.velocity.y * enemy.velocity.y;
-        if (vlen_sq < 1.0f) return 0;
-
-        GW::GamePos offset_pos = enemy.pos;
-        const float vlen = sqrtf(vlen_sq);
-        offset_pos.x += enemy.velocity.x / vlen * 500.0f;
-        offset_pos.y += enemy.velocity.y / vlen * 500.0f;
-        GW::Vec2f screen_offset;
-        if (!GamePosToMissionMapScreenPos(offset_pos, screen_offset)) return 0;
-
-        float dx = screen_offset.x - cx;
-        float dy = screen_offset.y - cy;
-        const float slen = sqrtf(dx * dx + dy * dy);
-        if (slen < 0.1f) return 0;
-        dx /= slen;
-        dy /= slen;
-
-        const float tip_x = cx + dx * ARROW_LENGTH;
-        const float tip_y = cy + dy * ARROW_LENGTH;
-        const float base_x = cx + dx * (MARKER_SIZE * 0.5f);
-        const float base_y = cy + dy * (MARKER_SIZE * 0.5f);
-        const float nx = -dy, ny = dx;
-        constexpr float OL = 2.5f;
-
-        VertexBuffers::Vertex* v = vb.ScreenAlloc(6);
-        if (!v) return 0;
-        v[0] = {tip_x + dx * OL, tip_y + dy * OL, 0.f, 1.f, COLOR_ARROW_OUTLINE};
-        v[1] = {base_x + nx * (ARROW_HALF_WIDTH + OL), base_y + ny * (ARROW_HALF_WIDTH + OL), 0.f, 1.f, COLOR_ARROW_OUTLINE};
-        v[2] = {base_x - nx * (ARROW_HALF_WIDTH + OL), base_y - ny * (ARROW_HALF_WIDTH + OL), 0.f, 1.f, COLOR_ARROW_OUTLINE};
-        v[3] = {tip_x, tip_y, 0.f, 1.f, COLOR_ARROW};
-        v[4] = {base_x + nx * ARROW_HALF_WIDTH, base_y + ny * ARROW_HALF_WIDTH, 0.f, 1.f, COLOR_ARROW};
-        v[5] = {base_x - nx * ARROW_HALF_WIDTH, base_y - ny * ARROW_HALF_WIDTH, 0.f, 1.f, COLOR_ARROW};
-        out_count += 6;
-        return 6;
-    }
-
-    // Enqueues halo + outline diamond + fill diamond (+ arrow if stale) for one enemy.
-    int EnqueueEnemyMarker(VertexBuffers& vb, int& out_count, const TrackedEnemy& enemy)
-    {
-        constexpr float MARKER_SIZE = 9.0f;
-        constexpr float OUTLINE_SIZE = MARKER_SIZE + 2.0f;
-        if (enemy.state == EnemyState::NotApplicable) return 0;
-
-        GW::Vec2f screen_pos;
-        if (!GamePosToMissionMapScreenPos(enemy.pos, screen_pos)) return 0;
-
-        const bool is_stale = enemy.state == EnemyState::Stale;
-        const DWORD color = is_stale ? vq_color_enemy_stale : vq_color_enemy_alive;
-        const float cx = screen_pos.x, cy = screen_pos.y;
-
-        int added = 0;
-        added += EnqueueDiamond(vb, out_count, cx, cy, OUTLINE_SIZE, vq_color_enemy_outline);
-        added += EnqueueDiamond(vb, out_count, cx, cy, MARKER_SIZE, color);
-        if (is_stale) added += EnqueueVelocityArrow(vb, out_count, cx, cy, enemy);
-        return added;
-    }
-
-    // -----------------------------------------------------------------------
-    // EnqueueEnemyMarkers — writes all enemy markers into vb.screen_arena
-    // -----------------------------------------------------------------------
-    void EnqueueEnemyMarkers(VertexBuffers& vb)
-    {
-
-        // Stale first (drawn below alive)
-        for (size_t i = 0, len = highest_trackable_agent_id; i < len;i++) {
-            EnqueueEnemyMarker(vb, vb.enemy_count, tracked_enemies_by_agent_id[i]);
-        }
-    }
 
     // Returns true if the cell at flat local grid index `idx` is walkable and explored,
     // making the shared edge a frontier border. Caller is responsible for bounds checking.
@@ -1122,7 +1018,6 @@ namespace {
 
     int last_fog_player_cx = INT_MIN;
     int last_fog_player_cy = INT_MIN;
-    VertexBuffers vb;
 
     void BuildFogGeometry()
     {
@@ -1130,8 +1025,6 @@ namespace {
         if (!explored_cells || !cached_walkable_grid) return;
         fog_geo.Reserve(cached_grid_w, cached_grid_h);
 
-        const DWORD FOG_UNEXPLORED = (DWORD)vq_color_fog_unexplored;
-        const DWORD FRONTIER_COLOR = (DWORD)vq_color_frontier;
         const float FRONTIER_HALF_THICKNESS = cached_px_to_game;
         const float grid_origin_x = cached_grid_x0 * EXPLORE_CELL_SIZE;
         const float grid_origin_y = cached_grid_y0 * EXPLORE_CELL_SIZE;
@@ -1148,10 +1041,10 @@ namespace {
                 const float x0 = grid_origin_x + gx * EXPLORE_CELL_SIZE;
                 const float x1 = x0 + EXPLORE_CELL_SIZE;
 
-                fog_geo.unexplored_quads.emplace_back(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, FOG_UNEXPLORED);
+                fog_geo.unexplored_quads.emplace_back(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, vq_color_fog_unexplored);
 
                 const auto edge = [&](bool cond, int neighbour_idx, float ax, float ay, float bx, float by) {
-                    if (cond && IsFrontierEdge(neighbour_idx)) fog_geo.frontier_lines.emplace_back(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, FRONTIER_COLOR);
+                    if (cond && IsFrontierEdge(neighbour_idx)) fog_geo.frontier_lines.emplace_back(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier);
                 };
 
                 edge(gy > 0, idx - cached_grid_w, x0, y0, x1, y0);
@@ -1160,12 +1053,6 @@ namespace {
                 edge(gx < cached_grid_w - 1, idx + 1, x1, y0, x1, y1);
             }
         }
-    }
-
-    void RebuildCompassCircle()
-    {
-        const float game_thickness = COMPASS_CIRCLE_THICKNESS_PX * cached_px_to_game;
-        compass_circle = Circle({0.f, 0.f}, COMPASS_RANGE, game_thickness, (DWORD)vq_color_compass, COMPASS_CIRCLE_SEGMENTS);
     }
 
     void DrawVanquishToggleButton() {
@@ -1193,44 +1080,23 @@ namespace {
         ImGui::PopStyleVar(2);
     }
 
-    void DrawExplorable(IDirect3DDevice9* dx_device,GW::Constants::MapID ) {
-
-        // Fog overlay + frontier — rebuilt only when player cell changes
-        {
-            const auto player = GW::Agents::GetControlledCharacter();
-            if (show_vq_overlay && player) {
-                const int player_cx = static_cast<int>(floorf(player->pos.x / EXPLORE_CELL_SIZE));
-                const int player_cy = static_cast<int>(floorf(player->pos.y / EXPLORE_CELL_SIZE));
-
-                if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
-                    // Don't cache position until explored_cells is ready,
-                    // so we keep rebuilding until exploration data arrives.
-                    if (explored_cells) {
-                        last_fog_player_cx = player_cx;
-                        last_fog_player_cy = player_cy;
-                    }
-                    BuildFogGeometry();
-                }
-            }
-        }
-        // -----------------------------------------------------------------------
-        // Enemy markers
-        // -----------------------------------------------------------------------
-        vb.enemy_start = vb.screen_arena_pos;
-        if (show_vq_overlay) {
-            EnqueueEnemyMarkers(vb);
-            SubmitVertexBuffers(dx_device, vb);
-            DrawEnemyCountLabel();
-
-        }
-        else {
-            SubmitVertexBuffers(dx_device, vb);
-        }
-        DrawVanquishToggleButton();
-    }
-    void DrawOutpost(IDirect3DDevice9* dx_device, GW::Constants::MapID)
+    void EnqueueMinimapLines(GW::Constants::MapID map_id)
     {
-        SubmitVertexBuffers(dx_device, vb);
+        const auto& lines = Minimap::Instance().custom_renderer.GetLines();
+        minimap_lines.reserve(lines.size());
+        minimap_lines.clear();
+        if (lines.empty()) return;
+        const float LINE_HALF_THICKNESS = 1.f * cached_px_to_game;
+        for (const auto& line : lines) {
+            if (!line->visible) continue;
+            if (!line->draw_on_mission_map && !(draw_all_minimap_lines && line->draw_on_minimap) && !(draw_all_terrain_lines && line->draw_on_terrain)) continue;
+            if (line->map != map_id) continue;
+            minimap_lines.emplace_back(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color));
+        }
+    }
+
+    void RebuildCompassCircle() {
+        compass_circle = Circle({0.f, 0.f}, COMPASS_RANGE, COMPASS_CIRCLE_THICKNESS_PX * cached_px_to_game, (DWORD)vq_color_compass, COMPASS_CIRCLE_SEGMENTS);
     }
 
     // -----------------------------------------------------------------------
@@ -1242,12 +1108,13 @@ namespace {
         if (!InitializeMissionMapParameters()) return;
         g2s.Rebuild();
         if (!g2s.valid) return;
-        vb.Reset();
+
+        should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
 
         // -----------------------------------------------------------------------
         // Custom renderer lines — screen space
         // -----------------------------------------------------------------------
-        const auto& lines = Minimap::Instance().custom_renderer.GetLines();
+        
         const auto map_id = GW::Map::GetMapID();
 
         const bool map_changed = map_id != border_map_id;
@@ -1266,30 +1133,33 @@ namespace {
                 RebuildMapBorder(); // rebuilds walkable grid + border segments
             }
         }
+        EnqueueMinimapLines(map_id);    
 
-        vb.line_start = vb.screen_arena_pos;
-        const float LINE_HALF_THICKNESS = 1.5f * cached_px_to_game;
+        if (should_draw_vq_overlay) {
+            // Fog overlay + frontier — rebuilt only when player cell changes
+            {
+                const auto player = GW::Agents::GetControlledCharacter();
+                if (show_vq_overlay && player) {
+                    const int player_cx = static_cast<int>(floorf(player->pos.x / EXPLORE_CELL_SIZE));
+                    const int player_cy = static_cast<int>(floorf(player->pos.y / EXPLORE_CELL_SIZE));
 
-        minimap_lines.reserve(lines.size());
-        minimap_lines.clear();
-        for (const auto& line : lines) {
-            if (!line->visible) continue;
-            if (!line->draw_on_mission_map && !(draw_all_minimap_lines && line->draw_on_minimap) && !(draw_all_terrain_lines && line->draw_on_terrain)) continue;
-            if (line->map != map_id) continue;
-            minimap_lines.emplace_back(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color));
+                    if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
+                        // Don't cache position until explored_cells is ready,
+                        // so we keep rebuilding until exploration data arrives.
+                        if (explored_cells) {
+                            last_fog_player_cx = player_cx;
+                            last_fog_player_cy = player_cy;
+                        }
+                        BuildFogGeometry();
+                    }
+                }
+            }
         }
 
-        // -----------------------------------------------------------------------
-        // VQ overlay — raw game coords, no per-vertex projection
-        // -----------------------------------------------------------------------
-        const bool in_explorable = ToolboxUtils::IsExplorable();
-
-        if (in_explorable) {
-            DrawExplorable(dx_device, map_id);
-        }
-        else {
-            DrawOutpost(dx_device, map_id);
-        }
+        SubmitVertexBuffers(dx_device);
+        if (should_draw_vq_overlay) 
+            DrawEnemyCountLabel();
+        DrawVanquishToggleButton();
     }
 } // namespace
 
