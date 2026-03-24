@@ -878,7 +878,10 @@ namespace {
     void SubmitVertexBuffers(IDirect3DDevice9* dx_device, const VertexBuffers& vb)
     {
         const bool in_explorable = GW::Map::GetInstanceType() == GW::Constants::InstanceType::Explorable;
-        if (!show_vq_overlay && in_explorable) return;
+        const bool draw_vq = show_vq_overlay || !in_explorable;
+
+        // Nothing to draw at all — skip the entire function
+        if (!draw_vq && !vb.line_count) return;
 
         DWORD oldAlphaBlend, oldSrcBlend, oldDestBlend, oldScissorTest, oldFVF, oldLighting, oldZEnable;
         D3DMATRIX oldWorld, oldView, oldProj;
@@ -912,8 +915,8 @@ namespace {
 
         // Pass 1: static map geometry + dynamic VQ (game coords via world matrix + ortho)
 
-        bool has_vertices_to_draw = static_map_geo.Any() || fog_geo.vert_count || compass_circle.vert_count;
-        
+        bool has_vertices_to_draw = draw_vq && (static_map_geo.Any() || fog_geo.vert_count || compass_circle.vert_count);
+
         if (has_vertices_to_draw) {
             D3DVIEWPORT9 vp;
             dx_device->GetViewport(&vp);
@@ -957,11 +960,11 @@ namespace {
         }
 
         // Pass 2: Screen-space geometry — XYZRHW bypasses transform pipeline
-        if (vb.line_count || vb.enemy_count) {
+        if (vb.line_count || (draw_vq && vb.enemy_count)) {
             dx_device->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
             if (vb.line_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.line_count / 3, vb.screen_arena + vb.line_start, sizeof(*vb.screen_arena));
-            if (vb.enemy_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.enemy_count / 3, vb.screen_arena + vb.enemy_start, sizeof(*vb.screen_arena));
+            if (draw_vq && vb.enemy_count) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, vb.enemy_count / 3, vb.screen_arena + vb.enemy_start, sizeof(*vb.screen_arena));
         }
 
         dx_device->SetFVF(oldFVF);
@@ -1285,9 +1288,9 @@ namespace {
             // -----------------------------------------------------------------------
             vb.enemy_start = vb.screen_arena_pos;
             EnqueueEnemyMarkers(vb);
-            SubmitVertexBuffers(dx_device, vb);
             DrawEnemyCountLabel();
         }
+        SubmitVertexBuffers(dx_device, vb);
         DrawVanquishToggleButton();
     }
     void DrawOutpost(IDirect3DDevice9*, GW::Constants::MapID)
