@@ -583,25 +583,16 @@ namespace {
         const auto* agents = player ? GW::Agents::GetAgentArray() : nullptr;
         if (!agents) return;
 
-        const auto& player_pos = player->pos;
+        //const auto& player_pos = player->pos;
 
         if (tracked_enemies_by_agent_id.size() < agents->size()) tracked_enemies_by_agent_id.resize(agents->size());
 
-        for (size_t agent_id = 0, len = agents->size(); agent_id < len;agent_id++) {
+        for (size_t agent_id = 0, len = agents->size(); agent_id < len; agent_id++) {
             const auto agent = agents->at(agent_id);
             auto& tracked = tracked_enemies_by_agent_id[agent_id];
             if (!agent) {
                 // Stale distance check — anything left as Stale that's too far away gets cleared
-                if (tracked.state == EnemyState::Stale) {
-                    const float dist = GW::GetSquareDistance(tracked.pos, player_pos);
-                    if (dist >= stale_range_sq) {
-                        tracked.state = EnemyState::NotApplicable;
-                    }
-                    else {
-                        highest_trackable_agent_id = agent_id;
-                    }
-                }
-                else if (tracked.state == EnemyState::Alive) {
+                if (tracked.state == EnemyState::Alive) {
                     tracked.state = EnemyState::Stale;
                     highest_trackable_agent_id = agent_id;
                 }
@@ -637,7 +628,7 @@ namespace {
         enemy_vertex_buffer.clear();
         enemy_velocity_arrow_buffer.clear();
         // Stale first (drawn below alive)
-        for (size_t i = 0, len = highest_trackable_agent_id; i < len; i++) {
+        for (size_t i = 0, len = highest_trackable_agent_id; i <= len; i++) {
             EnqueueEnemyMarker(tracked_enemies_by_agent_id[i]);
         }
     }
