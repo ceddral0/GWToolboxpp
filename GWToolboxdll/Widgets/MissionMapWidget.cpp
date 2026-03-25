@@ -206,8 +206,7 @@ namespace {
     QuadBuffer unexplored_area;
     QuadBuffer frontier_border;
     QuadBuffer minimap_lines;
-    QuadBuffer inaccessible_quads;
-    QuadBuffer inaccessible_borders;
+    QuadBuffer inaccessible_area_and_borders;
 
     constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
     constexpr size_t MAX_MAP_WIDTH = 50000;
@@ -373,34 +372,46 @@ namespace {
 
     void BuildStaticMapGeometry()
     {
-        const float border_thickness_game = cached_px_to_game; // TARGET_THICKNESS_PX = 1
-
+        const float border_thickness_game = cached_px_to_game;
         const float gx0 = cached_grid_x0 * EXPLORE_CELL_SIZE;
         const float gy0 = cached_grid_y0 * EXPLORE_CELL_SIZE;
         const float gx1 = (cached_grid_x0 + cached_grid_w) * EXPLORE_CELL_SIZE;
         const float gy1 = (cached_grid_y0 + cached_grid_h) * EXPLORE_CELL_SIZE;
         const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
 
-        inaccessible_quads.clear();
+        inaccessible_area_and_borders.clear();
 
         // 4 strips covering everything outside the grid
-        inaccessible_quads.push_back(Quad({gx0 - ext, gy0 - ext}, {gx1 + ext, gy0}, vq_color_inaccessible));
-        inaccessible_quads.push_back(Quad({gx0 - ext, gy1}, {gx1 + ext, gy1 + ext}, vq_color_inaccessible));
-        inaccessible_quads.push_back(Quad({gx0 - ext, gy0}, {gx0, gy1}, vq_color_inaccessible));
-        inaccessible_quads.push_back(Quad({gx1, gy0}, {gx1 + ext, gy1}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(Quad({gx0 - ext, gy0 - ext}, {gx1 + ext, gy0}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(Quad({gx0 - ext, gy1}, {gx1 + ext, gy1 + ext}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(Quad({gx0 - ext, gy0}, {gx0, gy1}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(Quad({gx1, gy0}, {gx1 + ext, gy1}, vq_color_inaccessible));
 
+        // merge horizontally-adjacent inaccessible cells into single quads per row
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
+            const float y0 = gy * EXPLORE_CELL_SIZE;
+            const float y1 = y0 + EXPLORE_CELL_SIZE;
+            int run_start = -1;
             for (int gx = cached_grid_x0; gx < cached_grid_x0 + cached_grid_w; gx++) {
-                if (IsGridCellWalkable(gx, gy)) continue;
-                const float x0 = gx * EXPLORE_CELL_SIZE;
-                const float y0 = gy * EXPLORE_CELL_SIZE;
-                inaccessible_quads.push_back(Quad({x0, y0}, {x0 + EXPLORE_CELL_SIZE, y0 + EXPLORE_CELL_SIZE}, vq_color_inaccessible));
+                if (!IsGridCellWalkable(gx, gy)) {
+                    if (run_start == -1) run_start = gx; // start a new run
+                }
+                else {
+                    if (run_start != -1) {
+                        // flush run
+                        inaccessible_area_and_borders.push_back(Quad({run_start * EXPLORE_CELL_SIZE, y0}, {gx * EXPLORE_CELL_SIZE, y1}, vq_color_inaccessible));
+                        run_start = -1;
+                    }
+                }
+            }
+            if (run_start != -1) {
+                // flush run at end of row
+                inaccessible_area_and_borders.push_back(Quad({run_start * EXPLORE_CELL_SIZE, y0}, {(cached_grid_x0 + cached_grid_w) * EXPLORE_CELL_SIZE, y1}, vq_color_inaccessible));
             }
         }
 
-        inaccessible_borders.clear();
         for (const auto& seg : cached_border_segments)
-            inaccessible_borders.push_back(Line(seg.p1, seg.p2, border_thickness_game, vq_color_border));
+            inaccessible_area_and_borders.push_back(Line(seg.p1, seg.p2, border_thickness_game, vq_color_border));
     }
 
     void RebuildMapBorder()
@@ -571,7 +582,7 @@ namespace {
         SetNavTarget(best_pos);
     }
 
-        void EnqueueEnemyMarker(const TrackedEnemy& enemy)
+    void EnqueueEnemyMarker(const TrackedEnemy& enemy)
     {
         if (enemy.state == EnemyState::NotApplicable) return;
         const DWORD color = enemy.state == EnemyState::Stale ? vq_color_enemy_stale : vq_color_enemy_alive;
@@ -958,8 +969,7 @@ namespace {
         dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
 
         if (should_draw_vq_overlay) {
-            inaccessible_quads.Render(dx_device);
-            inaccessible_borders.Render(dx_device);
+            inaccessible_area_and_borders.Render(dx_device);
             unexplored_area.Render(dx_device);
             frontier_border.Render(dx_device);
             if (!enemy_velocity_arrow_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_velocity_arrow_buffer.size(), enemy_velocity_arrow_buffer.data(), sizeof(GameVertex));
