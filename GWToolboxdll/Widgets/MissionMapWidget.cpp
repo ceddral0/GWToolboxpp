@@ -85,7 +85,6 @@ namespace {
     // Vertex buffer types and arena
     // -----------------------------------------------------------------------
     D3DTriangleBuffer enemy_vertex_buffer;
-    D3DTriangleBuffer enemy_velocity_arrow_buffer;
 
     // Static cached circle — built once per map/zoom change, centred on game origin
     constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
@@ -351,12 +350,12 @@ namespace {
     }
 
     bool nav_active = false;
-    GW::GamePos nav_target_pos;
-    GW::GamePos nav_marker_pos;
+    GW::Vec2f nav_target_pos;
+    GW::Vec2f nav_marker_pos;
     bool nav_marker_set = false;
     bool nav_marker_hidden = false;
 
-    constexpr float MARKER_UPDATE_DIST = 500.0f;
+    constexpr float MARKER_UPDATE_DIST = 500.0f * 500.f;
 
     void StopNavigating()
     {
@@ -368,17 +367,15 @@ namespace {
         ClearQuestMarker();
     }
 
-    void SetNavTarget(const GW::GamePos& target)
+    void SetNavTarget(const GW::Vec2f& target)
     {
         nav_active = true;
         nav_target_pos = target;
 
         const auto player = GW::Agents::GetControlledCharacter();
         if (player) {
-            const float dx = target.x - player->pos.x;
-            const float dy = target.y - player->pos.y;
-            constexpr float HIDE_RANGE = COMPASS_RANGE * 0.5f;
-            const bool in_compass = dx * dx + dy * dy < HIDE_RANGE * HIDE_RANGE;
+            constexpr float HIDE_RANGE_SQ = (COMPASS_RANGE * 0.5f) * (COMPASS_RANGE * 0.5f);
+            const bool in_compass = GW::GetSquareDistance(target, player->pos) < HIDE_RANGE_SQ;
 
             if (in_compass && !nav_marker_hidden) {
                 nav_marker_hidden = true;
@@ -393,9 +390,7 @@ namespace {
             }
         }
 
-        const float dx = target.x - nav_marker_pos.x;
-        const float dy = target.y - nav_marker_pos.y;
-        if (nav_marker_set && dx * dx + dy * dy < MARKER_UPDATE_DIST * MARKER_UPDATE_DIST) return;
+        if (nav_marker_set && GW::GetSquareDistance(target,nav_marker_pos) < MARKER_UPDATE_DIST) return;
 
         nav_marker_pos = target;
         nav_marker_set = true;
@@ -456,8 +451,8 @@ namespace {
             const float arrow_outline_width = arrow_width + 1.0f * cached_px_to_game;
             const auto arrow = D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_outline_length, arrow_outline_width, vq_color_enemy_outline);
             if (arrow.valid) {
-                enemy_velocity_arrow_buffer.push_back(arrow);
-                enemy_velocity_arrow_buffer.push_back(D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_length, arrow_width, color));
+                enemy_vertex_buffer.push_back(arrow);
+                enemy_vertex_buffer.push_back(D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_length, arrow_width, color));
             }
         }
     }
@@ -488,7 +483,7 @@ namespace {
             auto& tracked = tracked_enemies_by_agent_id[agent_id];
             if (!agent) {
                 // Stale distance check — anything left as Stale that's too far away gets cleared
-                if (tracked.state == EnemyState::Alive) {
+                if (tracked.state != EnemyState::NotApplicable) {
                     tracked.state = EnemyState::Stale;
                     highest_trackable_agent_id = agent_id;
                 }
@@ -501,7 +496,7 @@ namespace {
                 continue;
             }
             auto* npc = GW::Agents::GetNPCByID(living->player_number);
-            if (!npc || (npc->IsSpirit() || npc->IsMinion())) {
+            if (npc && (npc->IsSpirit() || npc->IsMinion())) {
                 tracked.state = EnemyState::NotApplicable;
                 continue;
             }
@@ -514,7 +509,7 @@ namespace {
         // Post-mark all alive entries as stale — agent loop will restore Alive if still visible
         for (size_t agent_id = agents->size(), len = tracked_enemies_by_agent_id.size(); agent_id < len; agent_id++) {
             auto& tracked = tracked_enemies_by_agent_id[agent_id];
-            if (tracked.state == EnemyState::Alive) {
+            if (tracked.state != EnemyState::NotApplicable) {
                 tracked.state = EnemyState::Stale;
                 highest_trackable_agent_id = agent_id;
             }
@@ -522,7 +517,6 @@ namespace {
 
         if (nav_active) NavigateToClosestEnemy();
         enemy_vertex_buffer.clear();
-        enemy_velocity_arrow_buffer.clear();
         // Stale first (drawn below alive)
         for (size_t i = 0, len = highest_trackable_agent_id; i <= len; i++) {
             EnqueueEnemyMarker(tracked_enemies_by_agent_id[i]);
@@ -832,7 +826,6 @@ namespace {
             inaccessible_area_and_borders.Render(dx_device);
             unexplored_area.Render(dx_device);
             frontier_border.Render(dx_device);
-            enemy_velocity_arrow_buffer.Render(dx_device);
             enemy_vertex_buffer.Render(dx_device);
 
             if (!compass_circle.empty()) {
