@@ -58,13 +58,12 @@ namespace {
     // Pixel-to-game-unit scale — converts pixel thickness to game units
     float cached_px_to_game = 1.f;
 
-    struct GameVertex {
-        float x, y, z;
-        DWORD color;
-        GameVertex() : x(0.f), y(0.f), z(0.f), color(0) {};
-        GameVertex(const float x, const float y, const float z, const DWORD color) : x(x), y(y), z(z), color(color) {};
-        GameVertex(const float x, const float y, const DWORD color) : x(x), y(y), z(0.f), color(color) {};
-    }; // D3DFVF_XYZ | D3DFVF_DIFFUSE
+    struct GameVertex : D3DVertex {
+        GameVertex() : D3DVertex(0.f, 0.f, 0.f, 0) {}
+        GameVertex(const float x, const float y, const float z, const D3DCOLOR color) : D3DVertex(x, y, z, color) {}
+        GameVertex(const float x, const float y, const D3DCOLOR color) : D3DVertex(x, y, 0.f, color) {}
+    }; // D3DFVF_CUSTOMVERTEX
+
     struct Diamond {
         GameVertex v[6];
         Diamond(const GW::Vec2f& pos, float radius, DWORD color)
@@ -84,7 +83,7 @@ namespace {
     struct VelocityArrow {
         GameVertex v[3];
 
-        VelocityArrow(const GW::GamePos& pos, const GW::Vec2f& velocity, float length, float half_width, DWORD color)
+        VelocityArrow(const GW::Vec2f& pos, const GW::Vec2f& velocity, float length, float half_width, DWORD color)
         {
             const float vlen_sq = velocity.x * velocity.x + velocity.y * velocity.y;
             if (vlen_sq < 1.0f) return;
@@ -118,25 +117,25 @@ namespace {
         }
     };
 
-    struct Line {
-        GameVertex v[6];
+    struct Line : Quad {
         Line(const GW::Vec2f& a, const GW::Vec2f& b, float thickness, DWORD color)
+            : Quad(
+                  {a.x, a.y}, // tl placeholder, overwritten below
+                  {b.x, b.y}, // br placeholder, overwritten below
+                  color
+              )
         {
             const float dx = b.x - a.x;
             const float dy = b.y - a.y;
             const float len = sqrtf(dx * dx + dy * dy);
             const float nx = (dy / len) * thickness;
             const float ny = (dx / len) * thickness;
-            GameVertex TL{a.x + nx, a.y - ny, color};
-            GameVertex TR{b.x + nx, b.y - ny, color};
-            GameVertex BR{b.x - nx, b.y + ny, color};
-            GameVertex BL{a.x - nx, a.y + ny, color};
-            v[0] = TL;
-            v[1] = TR;
-            v[2] = BR; // triangle 1
-            v[3] = TL;
-            v[4] = BR;
-            v[5] = BL; // triangle 2
+            v[0] = {a.x + nx, a.y - ny, color};
+            v[1] = {b.x + nx, b.y - ny, color};
+            v[2] = {b.x - nx, b.y + ny, color};
+            v[3] = {a.x + nx, a.y - ny, color};
+            v[4] = {b.x - nx, b.y + ny, color};
+            v[5] = {a.x - nx, a.y + ny, color};
         }
     };
     struct Circle {
@@ -155,26 +154,64 @@ namespace {
         }
     };
 
+        class QuadBuffer : public VBuffer {
+    public:
+        std::vector<Quad> quads;
+
+        void push_back(const Quad& q)
+        {
+            quads.push_back(q);
+            dirty = true;
+        }
+        bool empty() { return quads.empty(); }
+
+        void reserve(size_t n) { quads.reserve(n); }
+
+        void clear()
+        {
+            quads.clear();
+            dirty = true;
+        }
+
+        void Render(IDirect3DDevice9* device) override
+        {
+            if (dirty) Invalidate();
+            if (quads.empty()) return;
+            if (!initialized) {
+                initialized = true;
+                Initialize(device);
+            }
+            VBuffer::Render(device);
+        }
+
+        void Initialize(IDirect3DDevice9* device) override
+        {
+            dirty = false;
+            const size_t byte_size = quads.size() * sizeof(Quad);
+            if (!byte_size) return;
+            if (FAILED(device->CreateVertexBuffer(byte_size, D3DUSAGE_WRITEONLY, D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED, &buffer, nullptr))) return;
+            void* ptr = nullptr;
+            if (SUCCEEDED(buffer->Lock(0, byte_size, &ptr, 0))) {
+                memcpy(ptr, quads.data(), byte_size);
+                buffer->Unlock();
+            }
+            type = D3DPT_TRIANGLELIST;
+            count = quads.size() * 2;
+        }
+
+    private:
+        bool dirty = false;
+    };
+
+    QuadBuffer unexplored_area;
+    QuadBuffer frontier_border;
+    QuadBuffer minimap_lines;
+    QuadBuffer inaccessible_quads;
+    QuadBuffer inaccessible_borders;
+
     constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
     constexpr size_t MAX_MAP_WIDTH = 50000;
     constexpr size_t MAX_CELLS_PER_AXIS = (size_t)(MAX_MAP_WIDTH / EXPLORE_CELL_SIZE);
-
-    struct StaticMapGeometry {
-        std::vector<Quad> inaccessible_quads;
-        std::vector<Line> inaccessible_borders;
-
-        void Reserve(size_t grid_w, size_t grid_h)
-        {
-            inaccessible_quads.reserve(grid_w * grid_h);
-            inaccessible_borders.reserve(grid_w * grid_h * 4);
-        }
-
-        void Clear()
-        {
-            inaccessible_quads.clear();
-            inaccessible_borders.clear();
-        }
-    } static_map_geo;
 
     // Exploration tracking (fog of war)
     
@@ -336,14 +373,7 @@ namespace {
 
     void BuildStaticMapGeometry()
     {
-        static_map_geo.Clear();
-        static_map_geo.Reserve(cached_grid_w, cached_grid_h);
-
-
-
         const float border_thickness_game = cached_px_to_game; // TARGET_THICKNESS_PX = 1
-        const DWORD INACCESSIBLE_COLOR = (DWORD)vq_color_inaccessible;
-        const DWORD BORDER_COLOR = (DWORD)vq_color_border;
 
         const float gx0 = cached_grid_x0 * EXPLORE_CELL_SIZE;
         const float gy0 = cached_grid_y0 * EXPLORE_CELL_SIZE;
@@ -351,31 +381,26 @@ namespace {
         const float gy1 = (cached_grid_y0 + cached_grid_h) * EXPLORE_CELL_SIZE;
         const float ext = std::max(gx1 - gx0, gy1 - gy0) * 5.0f;
 
-        const auto enqueue_quad = [&](const GW::Vec2f& tl, const GW::Vec2f& br) {
-            static_map_geo.inaccessible_quads.emplace_back(tl, br, INACCESSIBLE_COLOR);
-        };
-
-        const auto enqueue_border = [&](const GW::Vec2f& a, const GW::Vec2f& b) {
-            static_map_geo.inaccessible_borders.emplace_back(a, b, border_thickness_game, BORDER_COLOR);
-        };
+        inaccessible_quads.clear();
 
         // 4 strips covering everything outside the grid
-        enqueue_quad({gx0 - ext, gy0 - ext}, {gx1 + ext, gy0});
-        enqueue_quad({gx0 - ext, gy1}, {gx1 + ext, gy1 + ext});
-        enqueue_quad({gx0 - ext, gy0}, {gx0, gy1});
-        enqueue_quad({gx1, gy0}, {gx1 + ext, gy1});
+        inaccessible_quads.push_back(Quad({gx0 - ext, gy0 - ext}, {gx1 + ext, gy0}, vq_color_inaccessible));
+        inaccessible_quads.push_back(Quad({gx0 - ext, gy1}, {gx1 + ext, gy1 + ext}, vq_color_inaccessible));
+        inaccessible_quads.push_back(Quad({gx0 - ext, gy0}, {gx0, gy1}, vq_color_inaccessible));
+        inaccessible_quads.push_back(Quad({gx1, gy0}, {gx1 + ext, gy1}, vq_color_inaccessible));
 
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
             for (int gx = cached_grid_x0; gx < cached_grid_x0 + cached_grid_w; gx++) {
                 if (IsGridCellWalkable(gx, gy)) continue;
                 const float x0 = gx * EXPLORE_CELL_SIZE;
                 const float y0 = gy * EXPLORE_CELL_SIZE;
-                enqueue_quad({x0, y0}, {x0 + EXPLORE_CELL_SIZE, y0 + EXPLORE_CELL_SIZE});
+                inaccessible_quads.push_back(Quad({x0, y0}, {x0 + EXPLORE_CELL_SIZE, y0 + EXPLORE_CELL_SIZE}, vq_color_inaccessible));
             }
         }
 
+        inaccessible_borders.clear();
         for (const auto& seg : cached_border_segments)
-            enqueue_border(seg.p1, seg.p2);
+            inaccessible_borders.push_back(Line(seg.p1, seg.p2, border_thickness_game, vq_color_border));
     }
 
     void RebuildMapBorder()
@@ -651,26 +676,6 @@ namespace {
 
     GW::UI::Frame* mission_map_frame = nullptr;
 
-    struct FogGeometry {
-        std::vector<Quad> unexplored_quads;
-        std::vector<Line> frontier_lines;
-
-        void Reserve(size_t grid_w, size_t grid_h)
-        {
-            unexplored_quads.reserve(grid_w * grid_h);
-            frontier_lines.reserve(grid_w * grid_h * 4);
-        }
-
-        void Clear()
-        {
-            unexplored_quads.clear();
-            frontier_lines.clear();
-        }
-    } fog_geo;
-
-    std::vector<Line> minimap_lines;
-
-
     bool IsScreenPosOnMissionMap(const GW::Vec2f& screen_pos)
     {
         if (!(mission_map_frame && mission_map_frame->IsVisible())) return false;
@@ -910,28 +915,23 @@ namespace {
         draw_list->AddText(text_pos, IM_COL32(255, 255, 255, 255), label);
     }
 
-    // -----------------------------------------------------------------------
-    // SubmitVertexBuffers — D3D state setup, draw calls, and restore
-    // -----------------------------------------------------------------------
+    struct D3DStateGuard {
+        IDirect3DStateBlock9* block = nullptr;
+
+        explicit D3DStateGuard(IDirect3DDevice9* dev) { dev->CreateStateBlock(D3DSBT_ALL, &block); }
+
+        ~D3DStateGuard()
+        {
+            if (block) {
+                block->Apply();
+                block->Release();
+            }
+        }
+    };
+
     void SubmitVertexBuffers(IDirect3DDevice9* dx_device)
     {
-
-
-        DWORD oldAlphaBlend, oldSrcBlend, oldDestBlend, oldScissorTest, oldFVF, oldLighting, oldZEnable;
-        D3DMATRIX oldWorld, oldView, oldProj;
-        RECT oldScissorRect;
-
-        dx_device->GetRenderState(D3DRS_ALPHABLENDENABLE, &oldAlphaBlend);
-        dx_device->GetRenderState(D3DRS_SRCBLEND, &oldSrcBlend);
-        dx_device->GetRenderState(D3DRS_DESTBLEND, &oldDestBlend);
-        dx_device->GetRenderState(D3DRS_SCISSORTESTENABLE, &oldScissorTest);
-        dx_device->GetRenderState(D3DRS_LIGHTING, &oldLighting);
-        dx_device->GetRenderState(D3DRS_ZENABLE, &oldZEnable);
-        dx_device->GetScissorRect(&oldScissorRect);
-        dx_device->GetFVF(&oldFVF);
-        dx_device->GetTransform(D3DTS_WORLD, &oldWorld);
-        dx_device->GetTransform(D3DTS_VIEW, &oldView);
-        dx_device->GetTransform(D3DTS_PROJECTION, &oldProj);
+        const D3DStateGuard guard(dx_device);
 
         dx_device->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
         dx_device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
@@ -958,44 +958,25 @@ namespace {
         dx_device->SetTransform(D3DTS_PROJECTION, &ortho);
 
         if (should_draw_vq_overlay) {
-            if (!static_map_geo.inaccessible_quads.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_quads.size() * 2, static_map_geo.inaccessible_quads.data(), sizeof(GameVertex));
-
-            if (!static_map_geo.inaccessible_borders.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_map_geo.inaccessible_borders.size() * 2, static_map_geo.inaccessible_borders.data(), sizeof(GameVertex));
-
-            if (!fog_geo.unexplored_quads.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.unexplored_quads.size() * 2, fog_geo.unexplored_quads.data(), sizeof(GameVertex));
-
-            if (!fog_geo.frontier_lines.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, fog_geo.frontier_lines.size() * 2, fog_geo.frontier_lines.data(), sizeof(GameVertex));
-
+            inaccessible_quads.Render(dx_device);
+            inaccessible_borders.Render(dx_device);
+            unexplored_area.Render(dx_device);
+            frontier_border.Render(dx_device);
             if (!enemy_velocity_arrow_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_velocity_arrow_buffer.size(), enemy_velocity_arrow_buffer.data(), sizeof(GameVertex));
-
             if (!enemy_vertex_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_vertex_buffer.size() * 2, enemy_vertex_buffer.data(), sizeof(GameVertex));
 
             if (!compass_circle.segments.empty()) {
                 if (const auto* player = GW::Agents::GetControlledCharacter()) {
                     D3DMATRIX compassMatrix = gameToScreen;
-                    const float px = player->pos.x, py = player->pos.y;
-                    compassMatrix._41 = g2s.ox + px * g2s.ax + py * g2s.bx;
-                    compassMatrix._42 = g2s.oy + px * g2s.ay + py * g2s.by;
+                    compassMatrix._41 = g2s.ox + player->pos.x * g2s.ax + player->pos.y * g2s.bx;
+                    compassMatrix._42 = g2s.oy + player->pos.x * g2s.ay + player->pos.y * g2s.by;
                     dx_device->SetTransform(D3DTS_WORLD, &compassMatrix);
                     dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, compass_circle.segments.size() * 2, compass_circle.segments.data(), sizeof(GameVertex));
                     dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
                 }
             }
         }
-
-        if (!minimap_lines.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, minimap_lines.size() * 2, minimap_lines.data(), sizeof(GameVertex));
-
-        dx_device->SetFVF(oldFVF);
-        dx_device->SetTransform(D3DTS_WORLD, &oldWorld);
-        dx_device->SetTransform(D3DTS_VIEW, &oldView);
-        dx_device->SetTransform(D3DTS_PROJECTION, &oldProj);
-        dx_device->SetRenderState(D3DRS_ZENABLE, oldZEnable);
-        dx_device->SetRenderState(D3DRS_LIGHTING, oldLighting);
-        dx_device->SetRenderState(D3DRS_DESTBLEND, oldDestBlend);
-        dx_device->SetRenderState(D3DRS_SRCBLEND, oldSrcBlend);
-        dx_device->SetRenderState(D3DRS_ALPHABLENDENABLE, oldAlphaBlend);
-        dx_device->SetRenderState(D3DRS_SCISSORTESTENABLE, oldScissorTest);
-        dx_device->SetScissorRect(&oldScissorRect);
+        minimap_lines.Render(dx_device);
     }
 
     // Returns true if the cell at flat local grid index `idx` is walkable and explored,
@@ -1012,9 +993,9 @@ namespace {
 
     void BuildFogGeometry()
     {
-        fog_geo.Clear();
+        unexplored_area.clear();
+        frontier_border.clear();
         if (!explored_cells || !cached_walkable_grid) return;
-        fog_geo.Reserve(cached_grid_w, cached_grid_h);
 
         const float FRONTIER_HALF_THICKNESS = cached_px_to_game;
         const float grid_origin_x = cached_grid_x0 * EXPLORE_CELL_SIZE;
@@ -1032,10 +1013,10 @@ namespace {
                 const float x0 = grid_origin_x + gx * EXPLORE_CELL_SIZE;
                 const float x1 = x0 + EXPLORE_CELL_SIZE;
 
-                fog_geo.unexplored_quads.emplace_back(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, vq_color_fog_unexplored);
+                unexplored_area.push_back(Quad(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, vq_color_fog_unexplored));
 
                 const auto edge = [&](bool cond, int neighbour_idx, float ax, float ay, float bx, float by) {
-                    if (cond && IsFrontierEdge(neighbour_idx)) fog_geo.frontier_lines.emplace_back(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier);
+                    if (cond && IsFrontierEdge(neighbour_idx)) frontier_border.push_back(Line(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier));
                 };
 
                 edge(gy > 0, idx - cached_grid_w, x0, y0, x1, y0);
@@ -1074,15 +1055,15 @@ namespace {
     void EnqueueMinimapLines(GW::Constants::MapID map_id)
     {
         const auto& lines = Minimap::Instance().custom_renderer.GetLines();
-        minimap_lines.reserve(lines.size());
         minimap_lines.clear();
+        minimap_lines.reserve(lines.size());
         if (lines.empty()) return;
         const float LINE_HALF_THICKNESS = 1.f * cached_px_to_game;
         for (const auto& line : lines) {
             if (!line->visible) continue;
             if (!line->draw_on_mission_map && !(draw_all_minimap_lines && line->draw_on_minimap) && !(draw_all_terrain_lines && line->draw_on_terrain)) continue;
             if (line->map != map_id) continue;
-            minimap_lines.emplace_back(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color));
+            minimap_lines.push_back(Line(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color)));
         }
     }
 
