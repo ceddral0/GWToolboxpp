@@ -4,7 +4,8 @@
 
 #include <GWCA/GameContainers/GamePos.h>
 
-#include <Widgets/Minimap/VBuffer.h>
+#include <D3DContainers.h>
+
 
 namespace GW {
     struct Agent;
@@ -18,7 +19,7 @@ namespace GW {
 
 using Color = uint32_t;
 
-class AgentRenderer : public VBuffer {
+class AgentRenderer : public D3DVertexBuffer {
     static constexpr int num_triangles = 32;
 
 public:

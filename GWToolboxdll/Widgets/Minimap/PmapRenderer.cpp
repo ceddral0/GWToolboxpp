@@ -5,7 +5,7 @@
 
 #include <GWCA/Managers/MapMgr.h>
 
-#include <Widgets/Minimap/D3DVertex.h>
+#include <D3DContainers.h>
 #include <Widgets/Minimap/PmapRenderer.h>
 
 #include <ImGuiAddons.h>
@@ -178,13 +178,13 @@ void PmapRenderer::Render(IDirect3DDevice9* device, const MinimapRenderContext& 
         SetDeviceTranslation(device, 0, -100.f, 0.f, &oldview);
 
         SetDeviceColor(device, ctx.shadow_color);
-        RenderVertices(device, 0, tri_count_);
+        D3DVertexBuffer::Render(device);
         ResetDeviceTranslation(device, oldview);
         ResetDeviceColor(device);
     }
     if (ctx.foreground_color & IM_COL32_A_MASK) {
         SetDeviceColor(device, ctx.foreground_color);
-        RenderVertices(device, 0, tri_count_);
+        D3DVertexBuffer::Render(device);
         ResetDeviceColor(device);
     }
 }

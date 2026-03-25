@@ -1,8 +1,8 @@
 #pragma once
 
-#include <Widgets/Minimap/VBuffer.h>
+#include <D3DContainers.h>
 
-class SymbolsRenderer : public VBuffer {
+class SymbolsRenderer : public D3DVertexBuffer {
     friend class QuestModule;
 
 public:

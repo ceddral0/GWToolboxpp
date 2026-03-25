@@ -229,7 +229,7 @@ void CustomRenderer::SaveMarkers()
 
 void CustomRenderer::Invalidate()
 {
-    VBuffer::Invalidate();
+    D3DVertexBuffer::Invalidate();
     linecircle.Invalidate();
 }
 
@@ -731,7 +731,7 @@ void CustomRenderer::Initialize(IDirect3DDevice9* device)
 
 void CustomRenderer::Terminate()
 {
-    VBuffer::Terminate();
+    D3DVertexBuffer::Terminate();
     for (const auto l : lines) {
         delete l;
     }

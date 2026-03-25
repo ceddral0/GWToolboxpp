@@ -2,7 +2,7 @@
 
 #include <GWCA/GameContainers/GamePos.h>
 
-#include <Widgets/Minimap/VBuffer.h>
+#include <D3DContainers.h>
 
 namespace GW::Constants {
     enum class MapID : uint32_t;
@@ -10,7 +10,7 @@ namespace GW::Constants {
 
 using Color = uint32_t;
 
-class CustomRenderer : public VBuffer {
+class CustomRenderer : public D3DVertexBuffer {
     friend class AgentRenderer;
     friend class GameWorldRenderer;
 
@@ -19,7 +19,7 @@ class CustomRenderer : public VBuffer {
         FullCircle
     };
 
-    struct CustomMarker final : VBuffer {
+    struct CustomMarker final : D3DVertexBuffer {
         CustomMarker(float x, float y, float s, Shape sh, GW::Constants::MapID m, const char* _name);
         explicit CustomMarker(const char* name);
         GW::GamePos pos;
@@ -38,7 +38,7 @@ class CustomRenderer : public VBuffer {
         void Initialize(IDirect3DDevice9* device) override;
     };
 
-    struct CustomPolygon final : VBuffer {
+    struct CustomPolygon final : D3DVertexBuffer {
         CustomPolygon(GW::Constants::MapID m, const char* n);
         explicit CustomPolygon(const char* name);
 
@@ -113,7 +113,7 @@ private:
         char tooltip_str[128]{};
     } map_id_tooltip;
 
-    class LineCircle : public VBuffer {
+    class LineCircle : public D3DVertexBuffer {
         void Initialize(IDirect3DDevice9* device) override;
     } linecircle;
 

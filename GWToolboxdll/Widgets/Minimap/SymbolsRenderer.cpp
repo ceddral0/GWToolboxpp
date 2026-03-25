@@ -155,7 +155,7 @@ void SymbolsRenderer::Initialize(IDirect3DDevice9* device)
 
 void SymbolsRenderer::Invalidate()
 {
-    VBuffer::Invalidate();
+    D3DVertexBuffer::Invalidate();
     this->initialized = false;
 }
 

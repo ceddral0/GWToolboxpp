@@ -33,7 +33,7 @@ namespace {
         Churning_earth       = 994
     };
 
-    class EffectCircle : public VBuffer {
+    class EffectCircle : public D3DVertexBuffer {
         void Initialize(IDirect3DDevice9* device) override;
 
     public:
@@ -126,7 +126,7 @@ void EffectRenderer::LoadDefaults()
 
 void EffectRenderer::Terminate()
 {
-    VBuffer::Terminate();
+    D3DVertexBuffer::Terminate();
     for (const auto& settings : aoe_effect_settings) {
         delete settings.second;
     }
@@ -139,7 +139,7 @@ void EffectRenderer::Terminate()
 
 void EffectRenderer::Invalidate()
 {
-    VBuffer::Invalidate();
+    D3DVertexBuffer::Invalidate();
     for (const auto p : aoe_effects) {
         delete p;
     }

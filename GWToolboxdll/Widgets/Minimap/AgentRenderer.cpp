@@ -505,7 +505,7 @@ void AgentRenderer::DrawSettings()
 
 void AgentRenderer::Terminate()
 {
-    VBuffer::Terminate();
+    D3DVertexBuffer::Terminate();
     custom_agents_map.clear();
     for (const CustomAgent* ca : custom_agents) {
         delete ca;

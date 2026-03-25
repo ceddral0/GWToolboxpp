@@ -17,6 +17,7 @@
 #include <Widgets/WorldMapWidget.h>
 #include <Utils/ToolboxUtils.h>
 #include <GWCA/Context/WorldContext.h>
+#include <D3DContainers.h>
 
 
 
@@ -58,155 +59,11 @@ namespace {
     // Pixel-to-game-unit scale — converts pixel thickness to game units
     float cached_px_to_game = 1.f;
 
-    struct GameVertex : D3DVertex {
-        GameVertex() : D3DVertex(0.f, 0.f, 0.f, 0) {}
-        GameVertex(const float x, const float y, const float z, const D3DCOLOR color) : D3DVertex(x, y, z, color) {}
-        GameVertex(const float x, const float y, const D3DCOLOR color) : D3DVertex(x, y, 0.f, color) {}
-    }; // D3DFVF_CUSTOMVERTEX
 
-    struct Diamond {
-        GameVertex v[6];
-        Diamond(const GW::Vec2f& pos, float radius, DWORD color)
-        {
-            GameVertex top{pos.x, pos.y + radius, color};
-            GameVertex right{pos.x + radius, pos.y, color};
-            GameVertex bot{pos.x, pos.y - radius, color};
-            GameVertex left{pos.x - radius, pos.y, color};
-            v[0] = top;
-            v[1] = right;
-            v[2] = bot; // triangle 1
-            v[3] = top;
-            v[4] = bot;
-            v[5] = left; // triangle 2
-        }
-    };
-    struct VelocityArrow {
-        GameVertex v[3];
-
-        VelocityArrow(const GW::Vec2f& pos, const GW::Vec2f& velocity, float length, float half_width, DWORD color)
-        {
-            const float vlen_sq = velocity.x * velocity.x + velocity.y * velocity.y;
-            if (vlen_sq < 1.0f) return;
-            const float vlen = sqrtf(vlen_sq);
-            const float dx = velocity.x / vlen;
-            const float dy = velocity.y / vlen;
-
-            const GW::Vec2f tip{pos.x + dx * length, pos.y + dy * length};
-            const float nx = -dy, ny = dx;
-
-            v[0] = {tip.x, tip.y, color};
-            v[1] = {pos.x + nx * half_width, pos.y + ny * half_width, color};
-            v[2] = {pos.x - nx * half_width, pos.y - ny * half_width, color};
-        }
-    };
-
-    struct Quad {
-        GameVertex v[6];
-        Quad(const GW::Vec2f& tl, const GW::Vec2f& br, DWORD color)
-        {
-            GameVertex TL{tl.x, tl.y, color};
-            GameVertex TR{br.x, tl.y, color};
-            GameVertex BR{br.x, br.y, color};
-            GameVertex BL{tl.x, br.y, color};
-            v[0] = TL;
-            v[1] = TR;
-            v[2] = BR; // triangle 1
-            v[3] = TL;
-            v[4] = BR;
-            v[5] = BL; // triangle 2
-        }
-    };
-
-    struct Line : Quad {
-        Line(const GW::Vec2f& a, const GW::Vec2f& b, float thickness, DWORD color)
-            : Quad(
-                  {a.x, a.y}, // tl placeholder, overwritten below
-                  {b.x, b.y}, // br placeholder, overwritten below
-                  color
-              )
-        {
-            const float dx = b.x - a.x;
-            const float dy = b.y - a.y;
-            const float len = sqrtf(dx * dx + dy * dy);
-            const float nx = (dy / len) * thickness;
-            const float ny = (dx / len) * thickness;
-            v[0] = {a.x + nx, a.y - ny, color};
-            v[1] = {b.x + nx, b.y - ny, color};
-            v[2] = {b.x - nx, b.y + ny, color};
-            v[3] = {a.x + nx, a.y - ny, color};
-            v[4] = {b.x - nx, b.y + ny, color};
-            v[5] = {a.x - nx, a.y + ny, color};
-        }
-    };
-    struct Circle {
-        std::vector<Line> segments;
-        Circle() = default;
-        Circle(const GW::Vec2f& center, float radius, float thickness, DWORD color, int segment_count = 64)
-        {
-            segments.reserve(segment_count);
-            GW::Vec2f prev = {center.x + radius, center.y};
-            for (int i = 1; i <= segment_count; i++) {
-                const float a = static_cast<float>(i) / segment_count * TWO_PI;
-                const GW::Vec2f cur = {center.x + radius * cosf(a), center.y + radius * sinf(a)};
-                segments.emplace_back(prev, cur, thickness, color);
-                prev = cur;
-            }
-        }
-    };
-
-        class QuadBuffer : public VBuffer {
-    public:
-        std::vector<Quad> quads;
-
-        void push_back(const Quad& q)
-        {
-            quads.push_back(q);
-            dirty = true;
-        }
-        bool empty() { return quads.empty(); }
-
-        void reserve(size_t n) { quads.reserve(n); }
-
-        void clear()
-        {
-            quads.clear();
-            dirty = true;
-        }
-
-        void Render(IDirect3DDevice9* device) override
-        {
-            if (dirty) Invalidate();
-            if (quads.empty()) return;
-            if (!initialized) {
-                initialized = true;
-                Initialize(device);
-            }
-            VBuffer::Render(device);
-        }
-
-        void Initialize(IDirect3DDevice9* device) override
-        {
-            dirty = false;
-            const size_t byte_size = quads.size() * sizeof(Quad);
-            if (!byte_size) return;
-            if (FAILED(device->CreateVertexBuffer(byte_size, D3DUSAGE_WRITEONLY, D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED, &buffer, nullptr))) return;
-            void* ptr = nullptr;
-            if (SUCCEEDED(buffer->Lock(0, byte_size, &ptr, 0))) {
-                memcpy(ptr, quads.data(), byte_size);
-                buffer->Unlock();
-            }
-            type = D3DPT_TRIANGLELIST;
-            count = quads.size() * 2;
-        }
-
-    private:
-        bool dirty = false;
-    };
-
-    QuadBuffer unexplored_area;
-    QuadBuffer frontier_border;
-    QuadBuffer minimap_lines;
-    QuadBuffer inaccessible_area_and_borders;
+    D3DTriangleBuffer unexplored_area;
+    D3DTriangleBuffer frontier_border;
+    D3DTriangleBuffer minimap_lines;
+    D3DTriangleBuffer inaccessible_area_and_borders;
 
     constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
     constexpr size_t MAX_MAP_WIDTH = 50000;
@@ -227,13 +84,13 @@ namespace {
     // -----------------------------------------------------------------------
     // Vertex buffer types and arena
     // -----------------------------------------------------------------------
-    std::vector<Diamond> enemy_vertex_buffer;
-    std::vector<VelocityArrow> enemy_velocity_arrow_buffer;
+    D3DTriangleBuffer enemy_vertex_buffer;
+    D3DTriangleBuffer enemy_velocity_arrow_buffer;
 
     // Static cached circle — built once per map/zoom change, centred on game origin
     constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
     constexpr float COMPASS_CIRCLE_THICKNESS_PX = 0.5f;
-    Circle compass_circle;
+    D3DCircle compass_circle;
 
     bool* cached_walkable_grid = nullptr;
     int cached_walkable_grid_size = 0;
@@ -382,10 +239,10 @@ namespace {
         inaccessible_area_and_borders.clear();
 
         // 4 strips covering everything outside the grid
-        inaccessible_area_and_borders.push_back(Quad({gx0 - ext, gy0 - ext}, {gx1 + ext, gy0}, vq_color_inaccessible));
-        inaccessible_area_and_borders.push_back(Quad({gx0 - ext, gy1}, {gx1 + ext, gy1 + ext}, vq_color_inaccessible));
-        inaccessible_area_and_borders.push_back(Quad({gx0 - ext, gy0}, {gx0, gy1}, vq_color_inaccessible));
-        inaccessible_area_and_borders.push_back(Quad({gx1, gy0}, {gx1 + ext, gy1}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(D3DQuad({gx0 - ext, gy0 - ext}, {gx1 + ext, gy0}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(D3DQuad({gx0 - ext, gy1}, {gx1 + ext, gy1 + ext}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(D3DQuad({gx0 - ext, gy0}, {gx0, gy1}, vq_color_inaccessible));
+        inaccessible_area_and_borders.push_back(D3DQuad({gx1, gy0}, {gx1 + ext, gy1}, vq_color_inaccessible));
 
         // merge horizontally-adjacent inaccessible cells into single quads per row
         for (int gy = cached_grid_y0; gy < cached_grid_y0 + cached_grid_h; gy++) {
@@ -399,19 +256,19 @@ namespace {
                 else {
                     if (run_start != -1) {
                         // flush run
-                        inaccessible_area_and_borders.push_back(Quad({run_start * EXPLORE_CELL_SIZE, y0}, {gx * EXPLORE_CELL_SIZE, y1}, vq_color_inaccessible));
+                        inaccessible_area_and_borders.push_back(D3DQuad({run_start * EXPLORE_CELL_SIZE, y0}, {gx * EXPLORE_CELL_SIZE, y1}, vq_color_inaccessible));
                         run_start = -1;
                     }
                 }
             }
             if (run_start != -1) {
                 // flush run at end of row
-                inaccessible_area_and_borders.push_back(Quad({run_start * EXPLORE_CELL_SIZE, y0}, {(cached_grid_x0 + cached_grid_w) * EXPLORE_CELL_SIZE, y1}, vq_color_inaccessible));
+                inaccessible_area_and_borders.push_back(D3DQuad({run_start * EXPLORE_CELL_SIZE, y0}, {(cached_grid_x0 + cached_grid_w) * EXPLORE_CELL_SIZE, y1}, vq_color_inaccessible));
             }
         }
 
         for (const auto& seg : cached_border_segments)
-            inaccessible_area_and_borders.push_back(Line(seg.p1, seg.p2, border_thickness_game, vq_color_border));
+            inaccessible_area_and_borders.push_back(D3DLine(seg.p1, seg.p2, border_thickness_game, vq_color_border));
     }
 
     void RebuildMapBorder()
@@ -589,16 +446,19 @@ namespace {
         const float diamond_radius = 9.0f * cached_px_to_game;
         const float diamond_outline_radius = diamond_radius + 1.0f * cached_px_to_game;
 
-        enemy_vertex_buffer.push_back(Diamond(enemy.pos, diamond_outline_radius, vq_color_enemy_outline));
-        enemy_vertex_buffer.push_back(Diamond(enemy.pos, diamond_radius, color));
+        enemy_vertex_buffer.push_back(D3DDiamond(enemy.pos, diamond_outline_radius, vq_color_enemy_outline));
+        enemy_vertex_buffer.push_back(D3DDiamond(enemy.pos, diamond_radius, color));
 
         if (enemy.state == EnemyState::Stale) {
             const float arrow_length = diamond_radius * 3.0f;
             const float arrow_width = diamond_radius - 2.0f * cached_px_to_game;
             const float arrow_outline_length = arrow_length + 1.0f * cached_px_to_game;
             const float arrow_outline_width = arrow_width + 1.0f * cached_px_to_game;
-            enemy_velocity_arrow_buffer.push_back(VelocityArrow(enemy.pos, enemy.velocity, arrow_outline_length, arrow_outline_width, vq_color_enemy_outline));
-            enemy_velocity_arrow_buffer.push_back(VelocityArrow(enemy.pos, enemy.velocity, arrow_length, arrow_width, color));
+            const auto arrow = D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_outline_length, arrow_outline_width, vq_color_enemy_outline);
+            if (arrow.valid) {
+                enemy_velocity_arrow_buffer.push_back(arrow);
+                enemy_velocity_arrow_buffer.push_back(D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_length, arrow_width, color));
+            }
         }
     }
 
@@ -972,16 +832,16 @@ namespace {
             inaccessible_area_and_borders.Render(dx_device);
             unexplored_area.Render(dx_device);
             frontier_border.Render(dx_device);
-            if (!enemy_velocity_arrow_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_velocity_arrow_buffer.size(), enemy_velocity_arrow_buffer.data(), sizeof(GameVertex));
-            if (!enemy_vertex_buffer.empty()) dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, enemy_vertex_buffer.size() * 2, enemy_vertex_buffer.data(), sizeof(GameVertex));
+            enemy_velocity_arrow_buffer.Render(dx_device);
+            enemy_vertex_buffer.Render(dx_device);
 
-            if (!compass_circle.segments.empty()) {
+            if (!compass_circle.empty()) {
                 if (const auto* player = GW::Agents::GetControlledCharacter()) {
                     D3DMATRIX compassMatrix = gameToScreen;
                     compassMatrix._41 = g2s.ox + player->pos.x * g2s.ax + player->pos.y * g2s.bx;
                     compassMatrix._42 = g2s.oy + player->pos.x * g2s.ay + player->pos.y * g2s.by;
                     dx_device->SetTransform(D3DTS_WORLD, &compassMatrix);
-                    dx_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, compass_circle.segments.size() * 2, compass_circle.segments.data(), sizeof(GameVertex));
+                    compass_circle.Render(dx_device);
                     dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
                 }
             }
@@ -1023,10 +883,10 @@ namespace {
                 const float x0 = grid_origin_x + gx * EXPLORE_CELL_SIZE;
                 const float x1 = x0 + EXPLORE_CELL_SIZE;
 
-                unexplored_area.push_back(Quad(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, vq_color_fog_unexplored));
+                unexplored_area.push_back(D3DQuad(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, vq_color_fog_unexplored));
 
                 const auto edge = [&](bool cond, int neighbour_idx, float ax, float ay, float bx, float by) {
-                    if (cond && IsFrontierEdge(neighbour_idx)) frontier_border.push_back(Line(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier));
+                    if (cond && IsFrontierEdge(neighbour_idx)) frontier_border.push_back(D3DLine(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier));
                 };
 
                 edge(gy > 0, idx - cached_grid_w, x0, y0, x1, y0);
@@ -1073,12 +933,12 @@ namespace {
             if (!line->visible) continue;
             if (!line->draw_on_mission_map && !(draw_all_minimap_lines && line->draw_on_minimap) && !(draw_all_terrain_lines && line->draw_on_terrain)) continue;
             if (line->map != map_id) continue;
-            minimap_lines.push_back(Line(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color)));
+            minimap_lines.push_back(D3DLine(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color)));
         }
     }
 
     void RebuildCompassCircle() {
-        compass_circle = Circle({0.f, 0.f}, COMPASS_RANGE, COMPASS_CIRCLE_THICKNESS_PX * cached_px_to_game, (DWORD)vq_color_compass, COMPASS_CIRCLE_SEGMENTS);
+        compass_circle = D3DCircle({0.f, 0.f}, COMPASS_RANGE, COMPASS_CIRCLE_THICKNESS_PX * cached_px_to_game, (DWORD)vq_color_compass, COMPASS_CIRCLE_SEGMENTS);
     }
 
     // -----------------------------------------------------------------------
