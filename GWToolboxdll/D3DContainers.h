@@ -47,6 +47,9 @@ struct D3DVelocityArrow : D3DShape<1> {
     D3DVelocityArrow(const D3DVec2f& pos, const D3DVec2f& velocity, float length, float half_width, DWORD color);
     bool Valid() const { return valid; }
 };
+struct D3DTeardrop : D3DShape<8> {
+    D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color_dark, DWORD color_light);
+};
 
 class D3DVertexBuffer {
 public:

@@ -133,3 +133,34 @@ D3DCircle::D3DCircle(const D3DVec2f& center, float radius, float thickness, DWOR
         prev = cur;
     }
 }
+
+D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color_dark, DWORD color_light)
+{
+    // Unit positions from AgentRenderer, scaled by radius and rotated
+    const auto vert = [&](float x, float y, DWORD color) -> D3DVertex {
+        const float rx = x * radius;
+        const float ry = y * radius;
+        const float cos_r = cosf(rotation);
+        const float sin_r = sinf(rotation);
+        return {pos.x + rx * cos_r - ry * sin_r, pos.y + rx * sin_r + ry * cos_r, color};
+    };
+
+    const D3DVertex A = vert(1.8f, 0.0f, color_dark);
+    const D3DVertex B = vert(0.7f, 0.7f, color_dark);
+    const D3DVertex C = vert(0.0f, 1.0f, color_dark);
+    const D3DVertex D = vert(-0.7f, 0.7f, color_dark);
+    const D3DVertex E = vert(-1.0f, 0.0f, color_dark);
+    const D3DVertex F = vert(-0.7f, -0.7f, color_dark);
+    const D3DVertex G = vert(0.0f, -1.0f, color_dark);
+    const D3DVertex H = vert(0.7f, -0.7f, color_dark);
+    const D3DVertex O = vert(0.0f, 0.0f, color_light);
+
+    t[0] = {A, B, O};
+    t[1] = {B, C, O};
+    t[2] = {C, D, O};
+    t[3] = {D, E, O};
+    t[4] = {E, F, O};
+    t[5] = {F, G, O};
+    t[6] = {G, H, O};
+    t[7] = {H, A, O};
+}

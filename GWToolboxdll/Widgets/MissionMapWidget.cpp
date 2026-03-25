@@ -41,7 +41,7 @@ namespace {
     enum class EnemyState { NotApplicable, Alive, Stale };
     struct TrackedEnemy {
         GW::Vec2f pos;
-        GW::Vec2f velocity = {0.0f, 0.0f}; // last known movement direction
+        float rotation = 0.f; // last known movement direction
         EnemyState state = EnemyState::NotApplicable;
     };
     std::vector<TrackedEnemy> tracked_enemies_by_agent_id; // agent_id -> tracked enemy
@@ -434,27 +434,16 @@ namespace {
         SetNavTarget(best_pos);
     }
 
-    void EnqueueEnemyMarker(const TrackedEnemy& enemy)
+void EnqueueEnemyMarker(const TrackedEnemy& enemy)
     {
         if (enemy.state == EnemyState::NotApplicable) return;
+        const float px = cached_px_to_game;
+        const float radius = 9.0f * px;
+        const float radius_outer = radius + px;
         const DWORD color = enemy.state == EnemyState::Stale ? vq_color_enemy_stale : vq_color_enemy_alive;
-        const float diamond_radius = 9.0f * cached_px_to_game;
-        const float diamond_outline_radius = diamond_radius + 1.0f * cached_px_to_game;
 
-        enemy_vertex_buffer.push_back(D3DDiamond(enemy.pos, diamond_outline_radius, vq_color_enemy_outline));
-        enemy_vertex_buffer.push_back(D3DDiamond(enemy.pos, diamond_radius, color));
-
-        if (enemy.state == EnemyState::Stale) {
-            const float arrow_length = diamond_radius * 3.0f;
-            const float arrow_width = diamond_radius - 2.0f * cached_px_to_game;
-            const float arrow_outline_length = arrow_length + 1.0f * cached_px_to_game;
-            const float arrow_outline_width = arrow_width + 1.0f * cached_px_to_game;
-            const auto arrow = D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_outline_length, arrow_outline_width, vq_color_enemy_outline);
-            if (arrow.valid) {
-                enemy_vertex_buffer.push_back(arrow);
-                enemy_vertex_buffer.push_back(D3DVelocityArrow(enemy.pos, enemy.velocity, arrow_length, arrow_width, color));
-            }
-        }
+        enemy_vertex_buffer.push_back(D3DTeardrop(enemy.pos, radius_outer, enemy.rotation, vq_color_enemy_outline, vq_color_enemy_outline));
+        enemy_vertex_buffer.push_back(D3DTeardrop(enemy.pos, radius, enemy.rotation, color, color));
     }
 
     constexpr float stale_range_sq = STALE_CHECK_RANGE * STALE_CHECK_RANGE;
@@ -502,7 +491,7 @@ namespace {
             }
 
             tracked.pos = {living->pos.x, living->pos.y};
-            tracked.velocity = living->velocity;
+            tracked.rotation = living->rotation_angle;
             tracked.state = EnemyState::Alive;
             highest_trackable_agent_id = agent_id;
         }
