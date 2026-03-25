@@ -866,7 +866,6 @@ namespace {
         unexplored_area.clear();
         frontier_border.clear();
         if (!explored_cells || !cached_walkable_grid) return;
-
         const float FRONTIER_HALF_THICKNESS = cached_px_to_game;
         const float grid_origin_x = cached_grid_x0 * EXPLORE_CELL_SIZE;
         const float grid_origin_y = cached_grid_y0 * EXPLORE_CELL_SIZE;
@@ -875,24 +874,34 @@ namespace {
             const float y0 = grid_origin_y + gy * EXPLORE_CELL_SIZE;
             const float y1 = y0 + EXPLORE_CELL_SIZE;
             const int row_base = gy * cached_grid_w;
+            int run_start = -1;
 
-            for (int gx = 0; gx < cached_grid_w; gx++) {
+            for (int gx = 0; gx <= cached_grid_w; gx++) {
                 const int idx = row_base + gx;
-                if (!cached_walkable_grid[idx] || explored_cells[idx]) continue;
+                const bool unexplored = gx < cached_grid_w && cached_walkable_grid[idx] && !explored_cells[idx];
 
-                const float x0 = grid_origin_x + gx * EXPLORE_CELL_SIZE;
-                const float x1 = x0 + EXPLORE_CELL_SIZE;
+                if (unexplored) {
+                    if (run_start == -1) run_start = gx;
 
-                unexplored_area.push_back(D3DQuad(GW::Vec2f{x0, y0}, GW::Vec2f{x1, y1}, vq_color_fog_unexplored));
-
-                const auto edge = [&](bool cond, int neighbour_idx, float ax, float ay, float bx, float by) {
-                    if (cond && IsFrontierEdge(neighbour_idx)) frontier_border.push_back(D3DLine(GW::Vec2f{ax, ay}, GW::Vec2f{bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier));
-                };
-
-                edge(gy > 0, idx - cached_grid_w, x0, y0, x1, y0);
-                edge(gy < cached_grid_h - 1, idx + cached_grid_w, x0, y1, x1, y1);
-                edge(gx > 0, idx - 1, x0, y0, x0, y1);
-                edge(gx < cached_grid_w - 1, idx + 1, x1, y0, x1, y1);
+                    // frontier edges still need to be per-cell
+                    const float x0 = grid_origin_x + gx * EXPLORE_CELL_SIZE;
+                    const float x1 = x0 + EXPLORE_CELL_SIZE;
+                    const auto edge = [&](bool cond, int neighbour_idx, float ax, float ay, float bx, float by) {
+                        if (cond && IsFrontierEdge(neighbour_idx)) frontier_border.push_back(D3DLine({ax, ay}, {bx, by}, FRONTIER_HALF_THICKNESS, vq_color_frontier));
+                    };
+                    edge(gy > 0, idx - cached_grid_w, x0, y0, x1, y0);
+                    edge(gy < cached_grid_h - 1, idx + cached_grid_w, x0, y1, x1, y1);
+                    edge(gx > 0, idx - 1, x0, y0, x0, y1);
+                    edge(gx < cached_grid_w - 1, idx + 1, x1, y0, x1, y1);
+                }
+                else {
+                    if (run_start != -1) {
+                        const float rx0 = grid_origin_x + run_start * EXPLORE_CELL_SIZE;
+                        const float rx1 = grid_origin_x + gx * EXPLORE_CELL_SIZE;
+                        unexplored_area.push_back(D3DQuad({rx0, y0}, {rx1, y1}, vq_color_fog_unexplored));
+                        run_start = -1;
+                    }
+                }
             }
         }
     }
