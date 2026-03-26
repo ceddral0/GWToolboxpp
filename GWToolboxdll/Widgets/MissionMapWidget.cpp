@@ -434,7 +434,7 @@ namespace {
         SetNavTarget(best_pos);
     }
 
-void EnqueueEnemyMarker(const TrackedEnemy& enemy)
+    void EnqueueEnemyMarker(const TrackedEnemy& enemy)
     {
         if (enemy.state == EnemyState::NotApplicable) return;
         const float px = cached_px_to_game;
@@ -813,8 +813,7 @@ void EnqueueEnemyMarker(const TrackedEnemy& enemy)
 
         if (should_draw_vq_overlay) {
             inaccessible_area_and_borders.Render(dx_device);
-            unexplored_area.Render(dx_device);
-            frontier_border.Render(dx_device);
+            unexplored_area.Render(dx_device); // NB: Includes frontier border!
             enemy_vertex_buffer.Render(dx_device);
 
             if (!compass_circle.empty()) {
@@ -886,6 +885,7 @@ void EnqueueEnemyMarker(const TrackedEnemy& enemy)
                 }
             }
         }
+        unexplored_area.push_back(frontier_border);
     }
 
     void DrawVanquishToggleButton() {

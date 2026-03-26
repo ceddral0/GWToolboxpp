@@ -76,6 +76,11 @@ public:
         triangles.insert(triangles.end(), shape.t, shape.t + N);
         dirty = true;
     }
+    void push_back(const D3DTriangle& shape)
+    {
+        triangles.push_back(shape);
+        dirty = true;
+    }
     void push_back(const D3DTriangleBuffer& other);
 
     bool empty() const { return triangles.empty(); }
@@ -92,4 +97,8 @@ private:
 struct D3DCircle : D3DTriangleBuffer {
     D3DCircle() = default;
     D3DCircle(const D3DVec2f& center, float radius, float thickness, DWORD color, int segment_count = 64);
+};
+struct D3DFillCircle : D3DTriangleBuffer {
+    D3DFillCircle() = default;
+    D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segment_count = 64);
 };

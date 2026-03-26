@@ -121,7 +121,6 @@ void D3DTriangleBuffer::Initialize(IDirect3DDevice9* device)
     count = triangles.size();
 }
 
-// D3DCircle
 D3DCircle::D3DCircle(const D3DVec2f& center, float radius, float thickness, DWORD color, int segment_count)
 {
     triangles.reserve(segment_count * 2);
@@ -134,27 +133,24 @@ D3DCircle::D3DCircle(const D3DVec2f& center, float radius, float thickness, DWOR
     }
 }
 
-D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color_dark, DWORD color_light)
+D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color, DWORD center_color)
 {
-    // Unit positions from AgentRenderer, scaled by radius and rotated
+    const float cos_r = cosf(rotation);
+    const float sin_r = sinf(rotation);
     const auto vert = [&](float x, float y, DWORD color) -> D3DVertex {
         const float rx = x * radius;
         const float ry = y * radius;
-        const float cos_r = cosf(rotation);
-        const float sin_r = sinf(rotation);
         return {pos.x + rx * cos_r - ry * sin_r, pos.y + rx * sin_r + ry * cos_r, color};
     };
-
-    const D3DVertex A = vert(1.8f, 0.0f, color_dark);
-    const D3DVertex B = vert(0.7f, 0.7f, color_dark);
-    const D3DVertex C = vert(0.0f, 1.0f, color_dark);
-    const D3DVertex D = vert(-0.7f, 0.7f, color_dark);
-    const D3DVertex E = vert(-1.0f, 0.0f, color_dark);
-    const D3DVertex F = vert(-0.7f, -0.7f, color_dark);
-    const D3DVertex G = vert(0.0f, -1.0f, color_dark);
-    const D3DVertex H = vert(0.7f, -0.7f, color_dark);
-    const D3DVertex O = vert(0.0f, 0.0f, color_light);
-
+    const D3DVertex A = vert(1.8f, 0.0f, color);
+    const D3DVertex B = vert(0.7f, 0.7f, color);
+    const D3DVertex C = vert(0.0f, 1.0f, color);
+    const D3DVertex D = vert(-0.7f, 0.7f, color);
+    const D3DVertex E = vert(-1.0f, 0.0f, color);
+    const D3DVertex F = vert(-0.7f, -0.7f, color);
+    const D3DVertex G = vert(0.0f, -1.0f, color);
+    const D3DVertex H = vert(0.7f, -0.7f, color);
+    const D3DVertex O = vert(0.0f, 0.0f, center_color);
     t[0] = {A, B, O};
     t[1] = {B, C, O};
     t[2] = {C, D, O};
@@ -163,4 +159,16 @@ D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWOR
     t[5] = {F, G, O};
     t[6] = {G, H, O};
     t[7] = {H, A, O};
+}
+
+D3DFillCircle::D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segment_count)
+{
+    triangles.reserve(segment_count);
+    D3DVec2f prev = {center.x + radius, center.y};
+    for (int i = 1; i <= segment_count; i++) {
+        const float a = static_cast<float>(i) / segment_count * M_PI * 2.f;
+        const D3DVec2f cur = {center.x + radius * cosf(a), center.y + radius * sinf(a)};
+        push_back(D3DTriangle{{{prev.x, prev.y, color}, {cur.x, cur.y, color}, {center.x, center.y, center_color}}});
+        prev = cur;
+    }
 }
