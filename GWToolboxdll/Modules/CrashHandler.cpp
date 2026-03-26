@@ -114,6 +114,9 @@ void CrashHandler::GWCAPanicHandler(
 
 void CrashHandler::FatalAssert(const char* expr, const char* file, const unsigned line)
 {
+#ifdef _DEBUG
+    __debugbreak();
+#endif
     __try {
         auto fmt = "Assertion Error: '%s' in '%s' line %u";
         const size_t len = snprintf(nullptr, 0, fmt, expr, file, line);

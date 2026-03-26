@@ -53,7 +53,7 @@ struct D3DTeardrop : D3DShape<8> {
 
 class D3DVertexBuffer {
 public:
-    virtual ~D3DVertexBuffer() = default;
+    virtual ~D3DVertexBuffer();
     virtual void Invalidate();
     virtual void Render(IDirect3DDevice9* device);
     virtual void Terminate();

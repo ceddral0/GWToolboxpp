@@ -62,6 +62,10 @@ D3DVelocityArrow::D3DVelocityArrow(const D3DVec2f& pos, const D3DVec2f& velocity
     valid = true;
 }
 
+D3DVertexBuffer::~D3DVertexBuffer() {
+    ASSERT(!buffer && "Forgot to call Invalidate() to release the vertex buffer before RAII kicked in!");
+}
+
 // D3DVertexBuffer
 void D3DVertexBuffer::Invalidate()
 {

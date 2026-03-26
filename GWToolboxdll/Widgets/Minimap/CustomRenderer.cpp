@@ -736,6 +736,14 @@ void CustomRenderer::Terminate()
         delete l;
     }
     lines.clear();
+    for (auto& p : polygons) {
+        p.Terminate();
+    }
+    polygons.clear();
+    for (auto& p : markers) {
+        p.Terminate();
+    }
+    markers.clear();
 }
 
 void CustomRenderer::CustomPolygon::Initialize(IDirect3DDevice9* device)

@@ -64,6 +64,9 @@ namespace {
     D3DTriangleBuffer frontier_border;
     D3DTriangleBuffer minimap_lines;
     D3DTriangleBuffer inaccessible_area_and_borders;
+    D3DTriangleBuffer enemy_vertex_buffer;
+    // Used to easily terminate hanging buffers later
+    D3DVertexBuffer* vertex_buffers[] = {&unexplored_area, &frontier_border, &minimap_lines, &inaccessible_area_and_borders, &enemy_vertex_buffer};
 
     constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
     constexpr size_t MAX_MAP_WIDTH = 50000;
@@ -84,7 +87,9 @@ namespace {
     // -----------------------------------------------------------------------
     // Vertex buffer types and arena
     // -----------------------------------------------------------------------
-    D3DTriangleBuffer enemy_vertex_buffer;
+
+
+
 
     // Static cached circle — built once per map/zoom change, centred on game origin
     constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
@@ -1121,4 +1126,8 @@ void MissionMapWidget::Terminate()
     cached_walkable_grid = nullptr;
     delete[] explored_cells;
     explored_cells = nullptr;
+
+    for (auto buffer : vertex_buffers) {
+        buffer->Terminate();
+    }
 }
