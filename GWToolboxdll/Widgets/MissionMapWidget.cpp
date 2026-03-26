@@ -1050,6 +1050,21 @@ void MissionMapWidget::Update(float)
         }
     } else {
         if (nav_active) StopNavigating();
+        // Reset tracking state so re-entering the same map triggers a fresh start
+        if (tracked_enemies_map_id != GW::Constants::MapID::None) {
+            tracked_enemies_by_agent_id.assign(tracked_enemies_by_agent_id.size(), {});
+            tracked_enemies_map_id = GW::Constants::MapID::None;
+            tracked_enemies_instance_type = GW::Constants::InstanceType::Loading;
+            highest_trackable_agent_id = 0;
+            enemy_vertex_buffer.clear();
+        }
+        // Reset exploration so fog of war restarts on the next explorable instance
+        if (explored_map_id != GW::Constants::MapID::None) {
+            delete[] explored_cells;
+            explored_cells = nullptr;
+            explored_map_id = GW::Constants::MapID::None;
+            explored_instance_type = GW::Constants::InstanceType::Loading;
+        }
     }
 
 }
