@@ -465,7 +465,7 @@ namespace {
         }
         if (argOutpost == L"nick" || argOutpost == L"nicholas") {
             const auto nick = DailyQuests::GetNicholasTheTraveller();
-            instance.TravelNearest(nick->map_id);
+            instance.TravelNearest(nick.quest->map_id);
             return;
         }
         if (argOutpost == L"quest") {

@@ -60,31 +60,7 @@ namespace {
     constexpr int modifier_key_item_descriptions = VK_MENU;
     int modifier_key_item_descriptions_key_state = 0;
 
-    std::wstring PrintRelativeTime(time_t timestamp)
-    {
-        const auto current_time = time(nullptr);
-        if (timestamp < current_time) return L"the past";
 
-        auto amount = timestamp - current_time;
-        auto time_format = [](time_t amt, const wchar_t* unit) {
-            if (amt != 1) return std::format(L"{} {}s", amt, unit);
-            return std::format(L"{} {}", amt, unit);
-        };
-
-        if (amount < 60) return L"less than a minute";
-        amount /= 60;
-        if (amount < 60) return time_format(amount, L"minute");
-        amount /= 60;
-        if (amount < 24) return time_format(amount, L"hour");
-        amount /= 24;
-        if (amount < 14) return time_format(amount, L"day");
-        amount /= 7;
-        if (amount < 8) return time_format(amount, L"week");
-        amount /= 4;
-        if (amount < 24) return time_format(amount, L"month");
-        amount /= 12;
-        return time_format(amount, L"year");
-    }
 
     const wchar_t* material_name_from_slot(GW::Constants::MaterialSlot material_id)
     {
@@ -214,7 +190,7 @@ namespace {
             text = std::format(L"Nicholas The Traveler collects {} of these right now!", nicholas_info->quantity);
         }
         else {
-            text = std::format(L"Nicholas The Traveler collects {} of these in {}!", nicholas_info->quantity, PrintRelativeTime(collection_time));
+            text = std::format(L"Nicholas The Traveler collects {} of these {}!", nicholas_info->quantity, TextUtils::RelativeTimeW(collection_time));
         }
         if (!description.empty())
             description += L"\x2";
