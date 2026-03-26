@@ -1163,6 +1163,35 @@ namespace {
         }
         
     }
+    struct SkillToUse {
+        uint32_t slot = 0; // 1-8 range
+        float skill_usage_delay = 0.f;
+        clock_t skill_timer = clock();
+        void Update();
+    } skill_to_use;
+    const char* useskill_syntax = "'/useskill <skill>' starts using the skill on recharge.\n"
+                                  "Use the skill number instead of <skill> (e.g. '/useskill 5').\n"
+                                  "Use empty '/useskill' or '/useskill stop' to stop all.\n"
+                                  "Use '/useskill <skill>' to stop the skill.";
+    void CHAT_CMD_FUNC(CmdUseSkill)
+    {
+        if (!IsMapReady() || argc < 2) {
+            Log::Warning(useskill_syntax);
+            return;
+        }
+        const std::wstring arg1 = TextUtils::ToLower(argv[1]);
+        if (arg1 == L"stop" || arg1 == L"off") {
+            return;
+        }
+        uint32_t num = 0;
+        if (!TextUtils::ParseUInt(argv[1], &num) || num > 8) {
+            Log::Warning(useskill_syntax);
+            return;
+        }
+        if (skill_to_use.slot == num) num = 0;
+        skill_to_use.slot = num;
+        skill_to_use.skill_usage_delay = .0f;
+    }
 
     void HookOnChatInteraction() {
         if (OnChatInteraction_Callback_Func) return;
@@ -1324,10 +1353,7 @@ namespace {
         ImGui::Bullet();
         ImGui::Text("'/travel [zv|zb|zm]' travel to nearest unlocked outpost to daily quest.");
         ImGui::Bullet();
-        ImGui::Text("'/useskill <skill>' starts using the skill on recharge. "
-            "Use the skill number instead of <skill> (e.g. '/useskill 5'). "
-            "Use empty '/useskill' or '/useskill stop' to stop all. "
-            "Use '/useskill <skill>' to stop the skill.");
+        ImGui::Text(useskill_syntax);
         ImGui::Bullet();
         ImGui::Text("'/volume [master|music|background|effects|dialog|ui] <amount (0-100)>' set in-game volume.");
         ImGui::Bullet();
@@ -1946,7 +1972,7 @@ void ChatCommands::SearchAgent::Update()
     Reset();
 }
 
-void ChatCommands::SkillToUse::Update()
+void SkillToUse::Update()
 {
     if (!slot) {
         return;
@@ -2581,27 +2607,7 @@ void CHAT_CMD_FUNC(ChatCommands::CmdTarget)
     return TargetNearest(GetRemainingArgsWstr(message, 1), Living | Gadget | Item);
 }
 
-void CHAT_CMD_FUNC(ChatCommands::CmdUseSkill)
-{
-    auto& skill_to_use = Instance().skill_to_use;
-    skill_to_use.slot = 0;
-    if (!IsMapReady() || argc < 2) {
-        return;
-    }
-    const std::wstring arg1 = TextUtils::ToLower(argv[1]);
-    if (arg1 == L"stop" || arg1 == L"off") {
-        return;
-    }
-    uint32_t num = 0;
-    if (!TextUtils::ParseUInt(argv[1], &num) || num > 8) {
-        Log::ErrorW(L"Invalid argument '%s', please use an integer value of 1 to 8", argv[1]);
-        return;
-    }
-    if (skill_to_use.slot == num)
-        num = 0;
-    skill_to_use.slot = num;
-    skill_to_use.skill_usage_delay = .0f;
-}
+
 
 void CHAT_CMD_FUNC(ChatCommands::CmdSCWiki)
 {
