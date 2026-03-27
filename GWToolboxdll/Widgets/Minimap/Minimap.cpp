@@ -1605,7 +1605,7 @@ void Minimap::Render(IDirect3DDevice9* device, const MinimapRenderContext& conte
 
 
     // Use context.draw_center_marker or check context.translation
-    if (context.draw_center_marker) {
+    if (context.draw_center_marker || context.translation.x) {
         const auto view2 = scaleM;
         device->SetTransform(D3DTS_VIEW, reinterpret_cast<const D3DMATRIX*>(&view2));
         instance.range_renderer.SetDrawCenter(true);
