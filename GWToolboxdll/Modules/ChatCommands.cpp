@@ -1997,6 +1997,7 @@ void SkillToUse::Update()
         slot = 0;
         return;
     }
+    if (skillbar->cast_array.size()) return; // Don't use skill if we've got anything queued
     const GW::Skill& skilldata = *GW::SkillbarMgr::GetSkillConstantData(skill.skill_id);
     if ((skilldata.adrenaline == 0 && skill.GetRecharge() == 0) || (skilldata.adrenaline > 0 && skill.adrenaline_a == skilldata.adrenaline)) {
         GW::SkillbarMgr::UseSkill(lslot, GW::Agents::GetTargetId());
