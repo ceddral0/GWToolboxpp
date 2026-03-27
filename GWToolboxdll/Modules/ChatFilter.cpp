@@ -656,23 +656,31 @@ namespace {
     }
 
     // Should this message be ignored by content?
+    // Check programmatic suppressions (e.g. /hero silent) — not gated by channel filter
+    bool IsSuppressedMessage(const wchar_t* message)
+    {
+        if (!(message && *message) || suppressed_messages.empty()) return false;
+        const auto now = TIMER_INIT();
+        for (auto it = suppressed_messages.begin(); it != suppressed_messages.end();) {
+            if (now > it->expires_at) {
+                it = suppressed_messages.erase(it);
+                continue;
+            }
+            if (wcsstr(message, it->substring.c_str())) {
+                return true;
+            }
+            ++it;
+        }
+        return false;
+    }
+
     bool ShouldIgnoreByContent(const wchar_t* message)
     {
         if (!(message && *message)) {
             return false;
         }
-        if (!suppressed_messages.empty()) {
-            const auto now = TIMER_INIT();
-            for (auto it = suppressed_messages.begin(); it != suppressed_messages.end();) {
-                if (now > it->expires_at) {
-                    it = suppressed_messages.erase(it);
-                    continue;
-                }
-                if (wcsstr(message, it->substring.c_str())) {
-                    return true;
-                }
-                ++it;
-            }
+        if (IsSuppressedMessage(message)) {
+            return true;
         }
 
         if (!messagebycontent) {
@@ -788,6 +796,10 @@ namespace {
             return true;
         }
         if (ShouldIgnore(message, player_name)) {
+            return true;
+        }
+        // Check programmatic suppressions (e.g. /hero silent) regardless of channel filter
+        if (IsSuppressedMessage(message)) {
             return true;
         }
         if (!ShouldFilterByChannel(channel)) {
