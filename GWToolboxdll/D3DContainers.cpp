@@ -63,7 +63,7 @@ D3DVelocityArrow::D3DVelocityArrow(const D3DVec2f& pos, const D3DVec2f& velocity
 }
 
 D3DVertexBuffer::~D3DVertexBuffer() {
-    ASSERT(!buffer && "Forgot to call Invalidate() to release the vertex buffer before RAII kicked in!");
+    Terminate();
 }
 
 // D3DVertexBuffer
@@ -75,13 +75,18 @@ void D3DVertexBuffer::Initialize(IDirect3DDevice9* device)
 }
 void D3DVertexBuffer::Invalidate()
 {
+
+    initialized = false;
+}
+void D3DVertexBuffer::Terminate()
+{
     if (buffer) buffer->Release();
     buffer = nullptr;
     buffer_byte_size = 0;
-    initialized = false;
 }
 void D3DVertexBuffer::UploadVertices(IDirect3DDevice9* device)
 {
+    count = 0;
     const size_t byte_size = vertices.size() * sizeof(D3DVertex);
     if (!byte_size) return;
 
@@ -97,7 +102,8 @@ void D3DVertexBuffer::UploadVertices(IDirect3DDevice9* device)
 
     void* ptr = nullptr;
     if (FAILED(buffer->Lock(0, byte_size, &ptr, 0))) {
-        Invalidate();
+        if (buffer) buffer->Release();
+        buffer = nullptr;
         return;
     }
     memcpy(ptr, vertices.data(), byte_size);

@@ -56,7 +56,7 @@ public:
     virtual ~D3DVertexBuffer();
     virtual void Invalidate();
     virtual void Render(IDirect3DDevice9* device);
-    virtual void Terminate() { Invalidate(); }
+    virtual void Terminate();
     virtual void Initialize(IDirect3DDevice9* device); // no longer pure
 
     virtual void reserve(size_t n) { vertices.reserve(n); }

@@ -152,6 +152,8 @@ namespace {
 
     GW::HookEntry OnAgentAdded_HookEntry;
 
+    bool hooks_added = false;
+
     void OnAgentAdded(GW::HookStatus*, const GW::Packet::StoC::AgentAdd* packet)
     {
         const auto agent_id = packet->agent_id;
@@ -520,6 +522,7 @@ AgentRenderer& AgentRenderer::Instance() { return *instance; }
 AgentRenderer::AgentRenderer()
 {
     instance = this;
+    last_check = TIMER_INIT();
     shapes[Tear].AddVertex(1.8f, 0, Dark);      // A
     shapes[Tear].AddVertex(0.7f, 0.7f, Dark);   // B
     shapes[Tear].AddVertex(0.0f, 0.0f, Light);  // O
@@ -588,13 +591,6 @@ AgentRenderer::AgentRenderer()
         shapes[Star].AddVertex(std::cos(angle2) * size2, std::sin(angle2) * size2, None);
         shapes[Star].AddVertex(0.0f, 0.0f, CircleCenter);
     }
-
-    max_shape_verts = 0;
-    for (int shape = 0; shape < shape_size; ++shape) {
-        if (max_shape_verts < shapes[shape].vertices.size()) {
-            max_shape_verts = shapes[shape].vertices.size();
-        }
-    }
 }
 
 void AgentRenderer::OnUIMessage(GW::HookStatus*, const GW::UI::UIMessage msgid, void* wParam, void*)
@@ -643,31 +639,21 @@ void AgentRenderer::Shape_t::AddVertex(const float x, const float y, const Color
 
 void AgentRenderer::Initialize(IDirect3DDevice9* device)
 {
-    if (initialized) {
-        return;
-    }
-    initialized = true;
     type = D3DPT_TRIANGLELIST;
-    vertices_max = max_shape_verts * 0x200; // support for up to 512 agents, should be enough
-    vertices = nullptr;
-    const HRESULT hr = device->CreateVertexBuffer(sizeof(D3DVertex) * vertices_max, 0,
-                                                  D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED, &buffer, nullptr);
-    if (FAILED(hr)) {
-        printf("AgentRenderer initialize error: HRESULT: 0x%lX\n", hr);
+    D3DVertexBuffer::Initialize(device);
+
+    if (!hooks_added) {
+        hooks_added = true;
+        constexpr GW::UI::UIMessage hook_messages[] = {GW::UI::UIMessage::kShowAgentNameTag, GW::UI::UIMessage::kSetAgentNameTagAttribs, GW::UI::UIMessage::kMapLoaded};
+        for (const auto message_id : hook_messages) {
+            RegisterUIMessageCallback(&UIMsg_Entry, message_id, OnUIMessage);
+        }
+        GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(&OnAgentAdded_HookEntry, OnAgentAdded);
+
+        GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"marktarget", CmdMarkTarget);
+        GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"clearmarktarget", CmdClearMarkTarget);
     }
 
-    constexpr GW::UI::UIMessage hook_messages[] = {
-        GW::UI::UIMessage::kShowAgentNameTag,
-        GW::UI::UIMessage::kSetAgentNameTagAttribs,
-        GW::UI::UIMessage::kMapLoaded
-    };
-    for (const auto message_id : hook_messages) {
-        RegisterUIMessageCallback(&UIMsg_Entry, message_id, OnUIMessage);
-    }
-    GW::StoC::RegisterPostPacketCallback<GW::Packet::StoC::AgentAdd>(&OnAgentAdded_HookEntry, OnAgentAdded);
-
-    GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"marktarget", CmdMarkTarget);
-    GW::Chat::CreateCommand(&ChatCmd_HookEntry, L"clearmarktarget", CmdClearMarkTarget);
 }
 
 std::vector<const AgentRenderer::CustomAgent*>* AgentRenderer::GetCustomAgentsToDraw(const GW::Agent* agent)
@@ -705,245 +691,231 @@ std::vector<const AgentRenderer::CustomAgent*>* AgentRenderer::GetCustomAgentsTo
 
 void AgentRenderer::Render(IDirect3DDevice9* device)
 {
-    if (!initialized) {
-        Initialize(device);
-        initialized = true;
-    }
+    const auto now = TIMER_INIT();
+    // Only update every 30 frames, reduce CPU load
+    if (now - last_check > 33) {
+        last_check = now;
+        clear();
 
-    const HRESULT res = buffer->Lock(0, sizeof(D3DVertex) * vertices_max, (VOID**)&vertices, D3DLOCK_DISCARD);
-    if (FAILED(res)) {
-        printf("AgentRenderer Lock() HRESULT: 0x%lX\n", res);
-    }
-
-    vertices_count = 0;
-
-    if (show_props_on_minimap) {
-        const auto& props = GW::GetMapContext()->props->propArray;
-        for (size_t i = 0; i < props.size(); i++) {
-            Enqueue(Quad, props[i], size_item, color_signpost);
+        if (show_props_on_minimap) {
+            const auto& props = GW::GetMapContext()->props->propArray;
+            for (size_t i = 0; i < props.size(); i++) {
+                Enqueue(Quad, props[i], size_item, color_signpost);
+            }
         }
-    }
 
-    // get stuff
-    GW::AgentArray* agents = GW::Agents::GetAgentArray();
-    if (!agents) {
-        return;
-    }
-
-    const GW::AgentLiving* player = GW::Agents::GetControlledCharacter();
-    const GW::Agent* target = GW::Agents::GetTarget();
-    if (target) {
-        auto_target_id = 0;
-    }
-    else if (auto_target_id) {
-        auto* const target_ = GW::Agents::GetAgentByID(auto_target_id);
-        target = target_ ? target_->GetAsAgentLiving() : nullptr;
-    }
-
-    // 1. eoes
-    for (GW::Agent* agent_ptr : *agents) {
-        if (!agent_ptr) {
-            continue;
+        // get stuff
+        GW::AgentArray* agents = GW::Agents::GetAgentArray();
+        if (!agents) {
+            return;
         }
-        const GW::AgentLiving* agent = agent_ptr->GetAsAgentLiving();
-        if (!agent) {
-            continue;
-        }
-        if (agent->GetIsDead()) {
-            continue;
-        }
-        switch (agent->player_number) {
-            case GW::Constants::ModelID::EoE:
-                Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_eoe);
-                break;
-            case GW::Constants::ModelID::QZ:
-                Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_qz);
-                break;
-            case GW::Constants::ModelID::Winnowing:
-                Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_winnowing);
-                break;
-            case GW::Constants::ModelID::FrozenSoil:
-                Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_frozen_soil);
-                break;
-            default:
-                break;
-        }
-    }
-    // 2. non-player agents
-    static std::vector<std::pair<const GW::Agent*, const CustomAgent*>> custom_agents_to_draw;
-    custom_agents_to_draw.clear();
 
-    static std::vector<const GW::AgentLiving*> marked_targets_to_draw;
-    marked_targets_to_draw.clear();
-    static std::vector<const GW::AgentLiving*> players_to_draw;
-    players_to_draw.clear();
-    static std::vector<const GW::AgentLiving*> dead_agents_to_draw;
-    dead_agents_to_draw.clear();
-    static std::vector<const GW::Agent*> other_agents_to_draw;
-    other_agents_to_draw.clear();
-
-    target_drawn = false;
-
-    // some helper lambads
-
-    const auto add_custom_agents_to_draw = [this](const GW::Agent* agent) -> bool {
-        const auto custom_agents_for_this_agent = GetCustomAgentsToDraw(agent);
-        if (!custom_agents_for_this_agent) {
-            return false;
+        const GW::AgentLiving* player = GW::Agents::GetControlledCharacter();
+        const GW::Agent* target = GW::Agents::GetTarget();
+        if (target) {
+            auto_target_id = 0;
         }
-        for (auto ca : *custom_agents_for_this_agent) {
-            custom_agents_to_draw.push_back({agent, ca});
+        else if (auto_target_id) {
+            auto* const target_ = GW::Agents::GetAgentByID(auto_target_id);
+            target = target_ ? target_->GetAsAgentLiving() : nullptr;
         }
-        return true;
-    };
 
-    const auto add_marked_target = [](const GW::AgentLiving* agent) -> bool {
-        if (!GetMarkedTarget(agent ? agent->agent_id : 0)) {
-            return false;
+        // 1. eoes
+        for (GW::Agent* agent_ptr : *agents) {
+            if (!agent_ptr) {
+                continue;
+            }
+            const GW::AgentLiving* agent = agent_ptr->GetAsAgentLiving();
+            if (!agent) {
+                continue;
+            }
+            if (agent->GetIsDead()) {
+                continue;
+            }
+            switch (agent->player_number) {
+                case GW::Constants::ModelID::EoE:
+                    Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_eoe);
+                    break;
+                case GW::Constants::ModelID::QZ:
+                    Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_qz);
+                    break;
+                case GW::Constants::ModelID::Winnowing:
+                    Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_winnowing);
+                    break;
+                case GW::Constants::ModelID::FrozenSoil:
+                    Enqueue(BigCircle, agent, GW::Constants::Range::SpiritExtended, color_frozen_soil);
+                    break;
+                default:
+                    break;
+            }
         }
-        marked_targets_to_draw.push_back(agent);
-        return true;
-    };
+        // 2. non-player agents
+        static std::vector<std::pair<const GW::Agent*, const CustomAgent*>> custom_agents_to_draw;
+        custom_agents_to_draw.clear();
 
-    const auto add_other_players_to_draw = [](const GW::AgentLiving* agent) -> bool {
-        if (!agent || !agent->IsPlayer() || agent == GW::Agents::GetObservingAgent()) {
-            return false;
-        }
-        players_to_draw.push_back(agent);
-        return true;
-    };
+        static std::vector<const GW::AgentLiving*> marked_targets_to_draw;
+        marked_targets_to_draw.clear();
+        static std::vector<const GW::AgentLiving*> players_to_draw;
+        players_to_draw.clear();
+        static std::vector<const GW::AgentLiving*> dead_agents_to_draw;
+        dead_agents_to_draw.clear();
+        static std::vector<const GW::Agent*> other_agents_to_draw;
+        other_agents_to_draw.clear();
 
-    const auto add_dead_agent_to_draw = [](const GW::AgentLiving* agent) -> bool {
-        if (!agent || !agent->GetIsDead()) {
-            return false;
-        }
-        dead_agents_to_draw.push_back(agent);
-        return true;
-    };
+        target_drawn = false;
 
-    auto sort_custom_agents_to_draw = [] {
-        std::ranges::sort(
-            custom_agents_to_draw,
-            [&](const std::pair<const GW::Agent*, const CustomAgent*>& pA,
-                const std::pair<const GW::Agent*, const CustomAgent*>& pB) {
+        // some helper lambads
+
+        const auto add_custom_agents_to_draw = [this](const GW::Agent* agent) -> bool {
+            const auto custom_agents_for_this_agent = GetCustomAgentsToDraw(agent);
+            if (!custom_agents_for_this_agent) {
+                return false;
+            }
+            for (auto ca : *custom_agents_for_this_agent) {
+                custom_agents_to_draw.push_back({agent, ca});
+            }
+            return true;
+        };
+
+        const auto add_marked_target = [](const GW::AgentLiving* agent) -> bool {
+            if (!GetMarkedTarget(agent ? agent->agent_id : 0)) {
+                return false;
+            }
+            marked_targets_to_draw.push_back(agent);
+            return true;
+        };
+
+        const auto add_other_players_to_draw = [](const GW::AgentLiving* agent) -> bool {
+            if (!agent || !agent->IsPlayer() || agent == GW::Agents::GetObservingAgent()) {
+                return false;
+            }
+            players_to_draw.push_back(agent);
+            return true;
+        };
+
+        const auto add_dead_agent_to_draw = [](const GW::AgentLiving* agent) -> bool {
+            if (!agent || !agent->GetIsDead()) {
+                return false;
+            }
+            dead_agents_to_draw.push_back(agent);
+            return true;
+        };
+
+        auto sort_custom_agents_to_draw = [] {
+            std::ranges::sort(custom_agents_to_draw, [&](const std::pair<const GW::Agent*, const CustomAgent*>& pA, const std::pair<const GW::Agent*, const CustomAgent*>& pB) {
                 return pA.second->index > pB.second->index;
             });
-    };
+        };
 
-    // Sort through all agents, fill out arrays
-    for (const auto agent : *agents) {
-        if (!agent) {
-            continue;
-        }
-        if (agent == player) {
-            continue; //  7. player
-        }
-        if (agent == target) {
-            continue; // 4. target if it's a non-player, 6. target if it's a player
-        }
-        if (agent->GetIsGadgetType()) {
-            const auto gadget = agent->GetAsAgentGadget();
-            if (GW::Map::GetMapID() == GW::Constants::MapID::Domain_of_Anguish && gadget->extra_type == 7602) {
+        // Sort through all agents, fill out arrays
+        for (const auto agent : *agents) {
+            if (!agent) {
                 continue;
             }
-            add_custom_agents_to_draw(gadget);
+            if (agent == player) {
+                continue; //  7. player
+            }
+            if (agent == target) {
+                continue; // 4. target if it's a non-player, 6. target if it's a player
+            }
+            if (agent->GetIsGadgetType()) {
+                const auto gadget = agent->GetAsAgentGadget();
+                if (GW::Map::GetMapID() == GW::Constants::MapID::Domain_of_Anguish && gadget->extra_type == 7602) {
+                    continue;
+                }
+                add_custom_agents_to_draw(gadget);
+            }
+            else if (agent->GetIsLivingType()) {
+                const auto living = agent->GetAsAgentLiving();
+                if (!show_hidden_npcs && !GW::Agents::GetIsAgentTargettable(living)) {
+                    continue;
+                }
+                if (add_marked_target(living)) {
+                    continue; // 8. marked targets
+                }
+                if (add_other_players_to_draw(living)) {
+                    continue; // 5. players
+                }
+                if (add_dead_agent_to_draw(living)) {
+                    continue;
+                }
+                if (add_custom_agents_to_draw(living)) {
+                    continue; // 3. custom colored models
+                }
+            }
+            other_agents_to_draw.push_back(agent);
         }
-        else if (agent->GetIsLivingType()) {
-            const auto living = agent->GetAsAgentLiving();
-            if (!show_hidden_npcs && !GW::Agents::GetIsAgentTargettable(living)) {
+
+        // Dead agents
+        for (const auto agent : dead_agents_to_draw) {
+            Enqueue(agent);
+        }
+
+        // 2. Generic agents
+        for (const auto agent : other_agents_to_draw) {
+            Enqueue(agent);
+        }
+
+        // 3. custom colored models
+        sort_custom_agents_to_draw();
+        for (const auto& [fst, snd] : custom_agents_to_draw) {
+            Enqueue(fst, snd);
+        }
+
+        // 8. marked
+        for (const auto agent : marked_targets_to_draw) {
+            if (!agent->GetIsAlive()) {
                 continue;
             }
-            if (add_marked_target(living)) {
-                continue; // 8. marked targets
-            }
-            if (add_other_players_to_draw(living)) {
-                continue; // 5. players
-            }
-            if (add_dead_agent_to_draw(living)) {
-                continue;
-            }
-            if (add_custom_agents_to_draw(living)) {
-                continue; // 3. custom colored models
-            }
-        }
-        other_agents_to_draw.push_back(agent);
-    }
-
-    // Dead agents
-    for (const auto agent : dead_agents_to_draw) {
-        Enqueue(agent);
-    }
-
-    // 2. Generic agents
-    for (const auto agent : other_agents_to_draw) {
-        Enqueue(agent);
-    }
-
-    // 3. custom colored models
-    sort_custom_agents_to_draw();
-    for (const auto& [fst, snd] : custom_agents_to_draw) {
-        Enqueue(fst, snd);
-    }
-
-    // 8. marked
-    for (const auto agent : marked_targets_to_draw) {
-        if (!agent->GetIsAlive()) {
-            continue;
-        }
-        // Apply custom size/shape if defined && marked_target_inherit_custom_agents == true
-        const auto* cas = GetCustomAgentsToDraw(agent);
-        const auto* ca = cas && !cas->empty() ? cas->front() : nullptr;
-        const auto size = marked_target_inherit_custom_agents && ca && ca->size_active && ca->size >= 0 ? ca->size : size_marked_target;
-        const auto shape = marked_target_inherit_custom_agents && ca && ca->shape_active ? ca->shape : default_shape;
-        Enqueue(shape, agent, size, color_marked_target);
-    }
-
-    // 4. target if it's a non-player
-    if (target && (!target->GetAsAgentLiving() || !target->GetAsAgentLiving()->IsPlayer())) {
-        const auto marked = GetMarkedTarget(target->agent_id);
-        const auto custom_agents_for_this_agent = GetCustomAgentsToDraw(target);
-        if (custom_agents_for_this_agent) {
-            for (const auto ca : *custom_agents_for_this_agent) {
-                Enqueue(target, ca);
-            }
-        }
-        if (marked) {
             // Apply custom size/shape if defined && marked_target_inherit_custom_agents == true
-            const auto* ca = custom_agents_for_this_agent && !custom_agents_for_this_agent->empty() ? custom_agents_for_this_agent->front() : nullptr;
+            const auto* cas = GetCustomAgentsToDraw(agent);
+            const auto* ca = cas && !cas->empty() ? cas->front() : nullptr;
             const auto size = marked_target_inherit_custom_agents && ca && ca->size_active && ca->size >= 0 ? ca->size : size_marked_target;
             const auto shape = marked_target_inherit_custom_agents && ca && ca->shape_active ? ca->shape : default_shape;
-            Enqueue(shape, target, size, color_marked_target);
+            Enqueue(shape, agent, size, color_marked_target);
         }
 
-        if (!marked && !custom_agents_for_this_agent) {
+        // 4. target if it's a non-player
+        if (target && (!target->GetAsAgentLiving() || !target->GetAsAgentLiving()->IsPlayer())) {
+            const auto marked = GetMarkedTarget(target->agent_id);
+            const auto custom_agents_for_this_agent = GetCustomAgentsToDraw(target);
+            if (custom_agents_for_this_agent) {
+                for (const auto ca : *custom_agents_for_this_agent) {
+                    Enqueue(target, ca);
+                }
+            }
+            if (marked) {
+                // Apply custom size/shape if defined && marked_target_inherit_custom_agents == true
+                const auto* ca = custom_agents_for_this_agent && !custom_agents_for_this_agent->empty() ? custom_agents_for_this_agent->front() : nullptr;
+                const auto size = marked_target_inherit_custom_agents && ca && ca->size_active && ca->size >= 0 ? ca->size : size_marked_target;
+                const auto shape = marked_target_inherit_custom_agents && ca && ca->shape_active ? ca->shape : default_shape;
+                Enqueue(shape, target, size, color_marked_target);
+            }
+
+            if (!marked && !custom_agents_for_this_agent) {
+                Enqueue(target);
+            }
+        }
+
+        // note: we don't support custom agents for players
+
+        // 5. players
+        for (const auto agent : players_to_draw) {
+            Enqueue(agent);
+        }
+
+        // 6. target if it's a player
+        if (target && target != player && target->GetAsAgentLiving() && target->GetAsAgentLiving()->IsPlayer()) {
             Enqueue(target);
         }
+
+        // 7. player
+        if (player) {
+            Enqueue(player);
+        }
     }
-
-    // note: we don't support custom agents for players
-
-    // 5. players
-    for (const auto agent : players_to_draw) {
-        Enqueue(agent);
-    }
-
-    // 6. target if it's a player
-    if (target && target != player && target->GetAsAgentLiving() && target->GetAsAgentLiving()->IsPlayer()) {
-        Enqueue(target);
-    }
-
-    // 7. player
-    if (player) {
-        Enqueue(player);
-    }
-
-    buffer->Unlock();
-
-    if (vertices_count != 0) {
-        device->SetStreamSource(0, buffer, 0, sizeof(D3DVertex));
-        device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, vertices_count / 3);
-        vertices_count = 0;
-    }
+    
+    D3DVertexBuffer::Render(device);
 }
 
 void AgentRenderer::Enqueue(const GW::Agent* agent, const CustomAgent* ca)
@@ -1291,35 +1263,33 @@ void AgentRenderer::Enqueue(const Shape_e shape, const GW::MapProp* agent, const
 
 void AgentRenderer::Enqueue(const Shape_e shape, const RenderPosition& pos, const float size, const Color color, const Color modifier)
 {
-    if ((color & IM_COL32_A_MASK) == 0) {
-        return;
-    }
-    const size_t num_v = shapes[shape].vertices.size();
-    ASSERT(vertices_count < vertices_max - num_v);
+    if ((color & IM_COL32_A_MASK) == 0) return;
 
-    for (size_t i = 0; i < num_v; ++i) {
-        const Shape_Vertex& vert = shapes[shape].vertices[i];
+    const auto& shape_verts = shapes[shape].vertices;
+    const size_t num_v = shape_verts.size();
+    const size_t offset = vertices.size();
+    vertices.reserve(offset + num_v); // no-op if capacity already sufficient
+
+    for (size_t i = 0; i < num_v; i++) {
+        const Shape_Vertex& vert = shape_verts[i];
         const GW::Vec2f calc_pos = Rotate(vert, pos.rotation_cos, pos.rotation_sin) * size + pos.position;
+        DWORD c;
         switch (vert.modifier) {
             case Dark:
-                vertices[i].color = Colors::Sub(color, modifier);
+                c = Colors::Sub(color, modifier);
                 break;
             case Light:
-                vertices[i].color = Colors::Add(color, modifier);
+                c = Colors::Add(color, modifier);
                 break;
             case CircleCenter:
-                vertices[i].color = Colors::Sub(color, IM_COL32(0, 0, 0, 50));
+                c = Colors::Sub(color, IM_COL32(0, 0, 0, 50));
                 break;
             default:
-                vertices[i].color = color;
+                c = color;
                 break;
         }
-        vertices[i].z = 0.0f;
-        vertices[i].x = calc_pos.x;
-        vertices[i].y = calc_pos.y;
+        vertices.push_back({calc_pos.x, calc_pos.y, 0.f, c});
     }
-    vertices += num_v;
-    vertices_count += num_v;
 }
 
 void AgentRenderer::BuildCustomAgentsMap()

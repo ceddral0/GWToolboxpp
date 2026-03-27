@@ -47,6 +47,8 @@ public:
 
     uint32_t auto_target_id = 0;
 
+    DWORD last_check = 0;
+
 private:
     static AgentRenderer* instance;
 
@@ -138,10 +140,6 @@ private:
 
     std::vector<const CustomAgent*>* GetCustomAgentsToDraw(const GW::Agent* agent);
 
-    D3DVertex* vertices = nullptr;    // vertices array
-    unsigned int vertices_count = 0;  // count of vertices
-    unsigned int vertices_max = 0;    // max number of vertices to draw in one call
-    unsigned int max_shape_verts = 0; // max number of triangles in a single shape
 
     Color color_agent_modifier = 0;
     Color color_agent_damaged_modifier = 0;
