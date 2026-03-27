@@ -56,42 +56,53 @@ public:
     virtual ~D3DVertexBuffer();
     virtual void Invalidate();
     virtual void Render(IDirect3DDevice9* device);
-    virtual void Terminate();
-    virtual void Initialize(IDirect3DDevice9* device) = 0;
+    virtual void Terminate() { Invalidate(); }
+    virtual void Initialize(IDirect3DDevice9* device); // no longer pure
+
+    virtual void reserve(size_t n) { vertices.reserve(n); }
+    virtual void clear()
+    {
+        vertices.clear();
+        dirty = true;
+    }
+    bool empty() const { return vertices.empty(); }
 
 protected:
+    void UploadVertices(IDirect3DDevice9* device); // the memcpy logic
+
     IDirect3DVertexBuffer9* buffer = nullptr;
+    size_t buffer_byte_size = 0;
     D3DPRIMITIVETYPE type = D3DPT_TRIANGLELIST;
     unsigned long count = 0;
     bool initialized = false;
+    bool dirty = false;
+    std::vector<D3DVertex> vertices;
 };
 
 class D3DTriangleBuffer : public D3DVertexBuffer {
 public:
-    std::vector<D3DTriangle> triangles;
-
     template <size_t N>
     void push_back(const D3DShape<N>& shape)
     {
-        triangles.insert(triangles.end(), shape.t, shape.t + N);
+        for (const auto& tri : shape.t) {
+            vertices.insert(vertices.end(), tri.v, tri.v + 3);
+        }
         dirty = true;
     }
-    void push_back(const D3DTriangle& shape)
+    void push_back(const D3DTriangle& tri)
     {
-        triangles.push_back(shape);
+        vertices.insert(vertices.end(), tri.v, tri.v + 3);
         dirty = true;
     }
-    void push_back(const D3DTriangleBuffer& other);
+    void push_back(const D3DTriangleBuffer& other)
+    {
+        vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
+        dirty = true;
+    }
 
-    bool empty() const { return triangles.empty(); }
-    void reserve(size_t n) { triangles.reserve(n); }
-    void clear();
+    void reserve(size_t n) override { vertices.reserve(n * 3); }
 
-    void Render(IDirect3DDevice9* device) override;
     void Initialize(IDirect3DDevice9* device) override;
-
-private:
-    bool dirty = false;
 };
 
 struct D3DCircle : D3DTriangleBuffer {

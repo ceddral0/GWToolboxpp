@@ -67,67 +67,78 @@ D3DVertexBuffer::~D3DVertexBuffer() {
 }
 
 // D3DVertexBuffer
+void D3DVertexBuffer::Initialize(IDirect3DDevice9* device)
+{
+    dirty = false;
+    UploadVertices(device);
+    initialized = true;
+}
 void D3DVertexBuffer::Invalidate()
 {
     if (buffer) buffer->Release();
     buffer = nullptr;
+    buffer_byte_size = 0;
     initialized = false;
 }
+void D3DVertexBuffer::UploadVertices(IDirect3DDevice9* device)
+{
+    const size_t byte_size = vertices.size() * sizeof(D3DVertex);
+    if (!byte_size) return;
 
+    if (buffer && byte_size > buffer_byte_size) {
+        buffer->Release();
+        buffer = nullptr;
+    }
+
+    if (!buffer) {
+        if (FAILED(device->CreateVertexBuffer(byte_size, D3DUSAGE_WRITEONLY, D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED, &buffer, nullptr))) return;
+        buffer_byte_size = byte_size;
+    }
+
+    void* ptr = nullptr;
+    if (FAILED(buffer->Lock(0, byte_size, &ptr, 0))) {
+        Invalidate();
+        return;
+    }
+    memcpy(ptr, vertices.data(), byte_size);
+    buffer->Unlock();
+
+    switch (type) {
+        case D3DPT_TRIANGLELIST:
+            count = vertices.size() / 3;
+            break;
+        case D3DPT_LINELIST:
+            count = vertices.size() / 2;
+            break;
+        case D3DPT_LINESTRIP:
+            count = vertices.size() - 1;
+            break;
+        default:
+            count = vertices.size();
+            break;
+    }
+}
 void D3DVertexBuffer::Render(IDirect3DDevice9* device)
 {
+    if (dirty) Invalidate();
     if (!initialized) {
         initialized = true;
         Initialize(device);
     }
-    if (!count) return;
+    if (!buffer || !count) return;
     device->SetFVF(D3DFVF_CUSTOMVERTEX);
     device->SetStreamSource(0, buffer, 0, sizeof(D3DVertex));
     device->DrawPrimitive(type, 0, count);
 }
 
-void D3DVertexBuffer::Terminate()
-{
-    Invalidate();
-}
-
-// D3DTriangleBuffer
-void D3DTriangleBuffer::push_back(const D3DTriangleBuffer& other)
-{
-    triangles.insert(triangles.end(), other.triangles.begin(), other.triangles.end());
-    dirty = true;
-}
-
-void D3DTriangleBuffer::clear()
-{
-    triangles.clear();
-    dirty = true;
-}
-
-void D3DTriangleBuffer::Render(IDirect3DDevice9* device)
-{
-    if (dirty) Invalidate();
-    D3DVertexBuffer::Render(device);
-}
-
 void D3DTriangleBuffer::Initialize(IDirect3DDevice9* device)
 {
-    dirty = false;
-    const size_t byte_size = triangles.size() * sizeof(D3DTriangle);
-    if (!byte_size) return;
-    if (FAILED(device->CreateVertexBuffer(byte_size, D3DUSAGE_WRITEONLY, D3DFVF_CUSTOMVERTEX, D3DPOOL_MANAGED, &buffer, nullptr))) return;
-    void* ptr = nullptr;
-    if (SUCCEEDED(buffer->Lock(0, byte_size, &ptr, 0))) {
-        memcpy(ptr, triangles.data(), byte_size);
-        buffer->Unlock();
-    }
     type = D3DPT_TRIANGLELIST;
-    count = triangles.size();
+    D3DVertexBuffer::Initialize(device);
 }
 
 D3DCircle::D3DCircle(const D3DVec2f& center, float radius, float thickness, DWORD color, int segment_count)
 {
-    triangles.reserve(segment_count * 2);
     D3DVec2f prev = {center.x + radius, center.y};
     for (int i = 1; i <= segment_count; i++) {
         const float a = static_cast<float>(i) / segment_count * M_PI * 2;
@@ -167,7 +178,6 @@ D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWOR
 
 D3DFillCircle::D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segment_count)
 {
-    triangles.reserve(segment_count);
     D3DVec2f prev = {center.x + radius, center.y};
     for (int i = 1; i <= segment_count; i++) {
         const float a = static_cast<float>(i) / segment_count * M_PI * 2.f;

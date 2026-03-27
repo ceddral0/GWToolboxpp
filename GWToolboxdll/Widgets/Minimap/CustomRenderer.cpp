@@ -231,6 +231,12 @@ void CustomRenderer::Invalidate()
 {
     D3DVertexBuffer::Invalidate();
     linecircle.Invalidate();
+    for (auto& m : markers) {
+        m.Invalidate();
+    }
+    for (auto& m : polygons) {
+        m.Invalidate();
+    }
 }
 
 void CustomRenderer::SetTooltipMapID(const GW::Constants::MapID& map_id)

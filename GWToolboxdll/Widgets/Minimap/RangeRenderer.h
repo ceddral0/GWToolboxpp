@@ -17,8 +17,6 @@ public:
     void LoadSettings(const ToolboxIni* ini, const char* section);
     void SaveSettings(ToolboxIni* ini, const char* section) const;
     void LoadDefaults();
-    // Returns number of vertices used.
-    size_t CreateCircle(D3DVertex* vertices, float radius, DWORD color) const;
 
 private:
     void Initialize(IDirect3DDevice9* device) override;
