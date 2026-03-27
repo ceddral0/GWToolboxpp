@@ -65,8 +65,9 @@ namespace {
     D3DTriangleBuffer minimap_lines;
     D3DTriangleBuffer inaccessible_area_and_borders;
     D3DTriangleBuffer enemy_vertex_buffer;
+    D3DCircle compass_circle;
     // Used to easily terminate hanging buffers later
-    D3DVertexBuffer* vertex_buffers[] = {&unexplored_area, &frontier_border, &minimap_lines, &inaccessible_area_and_borders, &enemy_vertex_buffer};
+    D3DVertexBuffer* vertex_buffers[] = {&unexplored_area, &frontier_border, &minimap_lines, &inaccessible_area_and_borders, &enemy_vertex_buffer, &compass_circle};
 
     constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
     constexpr size_t MAX_MAP_WIDTH = 50000;
@@ -94,7 +95,7 @@ namespace {
     // Static cached circle — built once per map/zoom change, centred on game origin
     constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
     constexpr float COMPASS_CIRCLE_THICKNESS_PX = 0.5f;
-    D3DCircle compass_circle;
+
 
     bool* cached_walkable_grid = nullptr;
     int cached_walkable_grid_size = 0;

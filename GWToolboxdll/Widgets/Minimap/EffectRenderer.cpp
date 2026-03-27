@@ -52,6 +52,7 @@ namespace {
             circle.range = range;
             circle.color = _color;
         }
+        ~Effect() { circle.Terminate();}
         clock_t start;
         const uint32_t effect_id;
         const GW::Vec2f pos;
