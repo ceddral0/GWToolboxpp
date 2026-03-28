@@ -273,7 +273,6 @@ namespace {
                 calculated_from = from;
                 UpdateUI();
             }
-            UpdateUI();
             return false;
         }
 

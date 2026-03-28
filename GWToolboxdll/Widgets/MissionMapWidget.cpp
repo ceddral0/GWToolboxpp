@@ -995,7 +995,8 @@ void MissionMapWidget::SaveSettings(ToolboxIni* ini)
 
 void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
 {
-    if (!visible) return;
+    if (!visible || !GW::Map::GetIsMapLoaded()) return;
+
     SubmitVertexBuffers(dx_device);
     if (should_draw_vq_overlay) 
         DrawEnemyCountLabel();
@@ -1003,14 +1004,17 @@ void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
 }
 void MissionMapWidget::Update(float)
 {
-    // Frame rate check
-    static clock_t last_check = TIMER_INIT();
-    if (!FrameRateCheck(last_check, 30)) return;
-
     if (!HookMissionMapFrame()) return;
     if (!InitializeMissionMapParameters()) return;
     g2s.Rebuild();
     if (!g2s.valid) return;
+    // Frame rate check
+    static clock_t last_check = TIMER_INIT();
+    if (!FrameRateCheck(last_check, 30)) return;
+
+
+
+
 
     should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
 
