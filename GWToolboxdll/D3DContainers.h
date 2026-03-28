@@ -47,9 +47,7 @@ struct D3DVelocityArrow : D3DShape<1> {
     D3DVelocityArrow(const D3DVec2f& pos, const D3DVec2f& velocity, float length, float half_width, DWORD color);
     bool Valid() const { return valid; }
 };
-struct D3DTeardrop : D3DShape<8> {
-    D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color_dark, DWORD color_light);
-};
+
 
 class D3DVertexBuffer {
 public:
@@ -75,7 +73,7 @@ protected:
     D3DPRIMITIVETYPE type = D3DPT_TRIANGLELIST;
     unsigned long count = 0;
     bool initialized = false;
-    bool dirty = false;
+    bool dirty = true;
     std::vector<D3DVertex> vertices;
 };
 
@@ -105,77 +103,29 @@ public:
     void Initialize(IDirect3DDevice9* device) override;
 };
 
+class D3DTeardrop : public D3DTriangleBuffer {
+public:
+    D3DTeardrop() = default;
+    D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color, DWORD center_color);
+};
+
 struct D3DCircle : D3DTriangleBuffer {
     D3DCircle() = default;
     D3DCircle(const D3DVec2f& center, float radius, float thickness, DWORD color, int segment_count = 64);
 };
-class D3DFillCircle : public D3DVertexBuffer {
+class D3DFillCircle : public D3DTriangleBuffer {
 public:
     D3DFillCircle() = default;
-    D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segments = 64);
+    D3DFillCircle(const D3DVec2f& center, float radius = 10.f, DWORD color = 0x99999999, DWORD center_color = 0xffffffff, int segments = 64);
 
-    void SetColor(DWORD c)
-    {
-        if (color == c) return;
-        color = c;
-        dirty = true;
-    }
-    void SetCenterColor(DWORD c)
-    {
-        if (center_color == c) return;
-        center_color = c;
-        dirty = true;
-    }
-    void SetRadius(float r)
-    {
-        if (radius == r) return;
-        radius = r;
-        dirty = true;
-    }
-    void SetSegments(int s)
-    {
-        if (segments == s) return;
-        segments = s;
-        dirty = true;
-    }
-
-    void Initialize(IDirect3DDevice9* device) override;
-
-private:
-    D3DVec2f center{0.f, 0.f};
-    DWORD color = 0xFFFFFFFF;
-    DWORD center_color = 0xFFFFFFFF;
-    float radius = 1.f;
-    int segments = 64;
+    void SetColor(DWORD c);
+    void SetCenterColor(DWORD c);
+    void SetRadius(float r);
 };
 class D3DLineCircle : public D3DVertexBuffer {
 public:
-    D3DLineCircle() = default;
-    D3DLineCircle(float radius, DWORD color, int segments = 48);
+    D3DLineCircle(float radius = 10.f, DWORD color = 0xffffffff, int segments = 64);
 
-    void SetColor(DWORD c)
-    {
-        if (color == c) return;
-        color = c;
-        dirty = true;
-    }
-    void SetRadius(float r)
-    {
-        if (radius == r) return;
-        radius = r;
-        dirty = true;
-    }
-    void SetSegments(int s)
-    {
-        if (segments == s) return;
-        segments = s;
-        dirty = true;
-    }
-
-    void Initialize(IDirect3DDevice9* device) override;
-
-private:
-    DWORD color = 0xFFFFFFFF;
-    float radius = 1.f;
-    int segments = 48;
+    void SetColor(DWORD c);
+    void SetRadius(float r);
 };

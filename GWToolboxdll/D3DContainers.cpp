@@ -156,56 +156,80 @@ D3DCircle::D3DCircle(const D3DVec2f& center, float radius, float thickness, DWOR
 
 D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color, DWORD center_color)
 {
+    type = D3DPT_TRIANGLELIST;
     const float cos_r = cosf(rotation);
     const float sin_r = sinf(rotation);
-    const auto vert = [&](float x, float y, DWORD color) -> D3DVertex {
+    const auto vert = [&](float x, float y, DWORD c) -> D3DVertex {
         const float rx = x * radius;
         const float ry = y * radius;
-        return {pos.x + rx * cos_r - ry * sin_r, pos.y + rx * sin_r + ry * cos_r, color};
+        return {pos.x + rx * cos_r - ry * sin_r, pos.y + rx * sin_r + ry * cos_r, 0.f, c};
     };
-    const D3DVertex A = vert(1.8f, 0.0f, color);
-    const D3DVertex B = vert(0.7f, 0.7f, color);
-    const D3DVertex C = vert(0.0f, 1.0f, color);
-    const D3DVertex D = vert(-0.7f, 0.7f, color);
-    const D3DVertex E = vert(-1.0f, 0.0f, color);
-    const D3DVertex F = vert(-0.7f, -0.7f, color);
-    const D3DVertex G = vert(0.0f, -1.0f, color);
-    const D3DVertex H = vert(0.7f, -0.7f, color);
-    const D3DVertex O = vert(0.0f, 0.0f, center_color);
-    t[0] = {A, B, O};
-    t[1] = {B, C, O};
-    t[2] = {C, D, O};
-    t[3] = {D, E, O};
-    t[4] = {E, F, O};
-    t[5] = {F, G, O};
-    t[6] = {G, H, O};
-    t[7] = {H, A, O};
+    constexpr std::pair<float, float> rim[] = {
+        {1.8f, 0.0f}, {0.7f, 0.7f}, {0.0f, 1.0f}, {-0.7f, 0.7f}, {-1.0f, 0.0f}, {-0.7f, -0.7f}, {0.0f, -1.0f}, {0.7f, -0.7f},
+    };
+    constexpr size_t n = std::size(rim);
+    const D3DVertex O = vert(0.f, 0.f, center_color);
+    vertices.resize(n * 3);
+    for (size_t i = 0; i < n; i++) {
+        const size_t base = i * 3;
+        vertices[base + 0] = vert(rim[i].first, rim[i].second, color);
+        vertices[base + 1] = vert(rim[(i + 1) % n].first, rim[(i + 1) % n].second, color);
+        vertices[base + 2] = O;
+    }
 }
 
-
-
-D3DFillCircle::D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segments) : center(center), color(color), center_color(center_color), radius(radius), segments(segments) {}
-
-void D3DFillCircle::Initialize(IDirect3DDevice9* device)
+D3DFillCircle::D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segments)
 {
     type = D3DPT_TRIANGLELIST;
     vertices.resize(segments * 3);
-    D3DVec2f prev = {center.x + radius, center.y};
-    for (int i = 1; i <= segments; i++) {
-        const float a = static_cast<float>(i) / segments * M_PI * 2.f;
-        const D3DVec2f cur = {center.x + radius * cosf(a), center.y + radius * sinf(a)};
+    for (size_t i = 2; i < vertices.size(); i += 3) {
+        vertices[i].x = center.x;
+        vertices[i].y = center.y;
+    }
+    SetRadius(radius);
+    SetColor(color);
+    SetCenterColor(center_color);
+}
+
+void D3DFillCircle::SetColor(DWORD c)
+{
+    if (vertices.empty() || vertices[0].color == c) return;
+    for (size_t i = 0; i < vertices.size(); i += 3) {
+        vertices[i + 0].color = c;
+        vertices[i + 1].color = c;
+    }
+    dirty = true;
+}
+
+void D3DFillCircle::SetCenterColor(DWORD c)
+{
+    if (vertices.empty() || vertices[2].color == c) return;
+    for (size_t i = 2; i < vertices.size(); i += 3) {
+        vertices[i].color = c;
+    }
+    dirty = true;
+}
+
+void D3DFillCircle::SetRadius(float r)
+{
+    if (vertices.empty() || vertices[0].x - vertices[2].x == r) return;
+    const float cx = vertices[2].x;
+    const float cy = vertices[2].y;
+    const int n = static_cast<int>(vertices.size() / 3);
+    D3DVec2f prev = {cx + r, cy};
+    for (int i = 1; i <= n; i++) {
+        const float a = static_cast<float>(i) / n * M_PI * 2.f;
+        const D3DVec2f cur = {cx + r * cosf(a), cy + r * sinf(a)};
         const int base = (i - 1) * 3;
-        vertices[base + 0] = {prev.x, prev.y, 0.f, color};
-        vertices[base + 1] = {cur.x, cur.y, 0.f, color};
-        vertices[base + 2] = {center.x, center.y, 0.f, center_color};
+        vertices[base + 0].x = prev.x;
+        vertices[base + 0].y = prev.y;
+        vertices[base + 1].x = cur.x;
+        vertices[base + 1].y = cur.y;
         prev = cur;
     }
-    D3DVertexBuffer::Initialize(device);
+    dirty = true;
 }
-D3DLineCircle::D3DLineCircle(float radius, DWORD color, int segments) : color(color), radius(radius), segments(segments) {}
-
-void D3DLineCircle::Initialize(IDirect3DDevice9* device)
-{
+D3DLineCircle::D3DLineCircle(float radius, DWORD color, int segments) {
     type = D3DPT_LINESTRIP;
     vertices.resize(segments + 1);
     for (int i = 0; i < segments; i++) {
@@ -213,5 +237,23 @@ void D3DLineCircle::Initialize(IDirect3DDevice9* device)
         vertices[i] = {radius * cosf(angle), radius * sinf(angle), 0.f, color};
     }
     vertices[segments] = vertices[0];
-    D3DVertexBuffer::Initialize(device);
+}
+void D3DLineCircle::SetColor(DWORD c)
+{
+    if (vertices.empty() || vertices[0].color == c) return;
+    for (auto& v : vertices)
+        v.color = c;
+    dirty = true;
+}
+void D3DLineCircle::SetRadius(float r)
+{
+    if (vertices.empty() || vertices[0].x == r) return; // x of first vertex == radius at angle 0
+    const int n = static_cast<int>(vertices.size()) - 1;
+    for (int i = 0; i < n; i++) {
+        const float angle = static_cast<float>(i) * (M_PI * 2.f / n);
+        vertices[i].x = r * cosf(angle);
+        vertices[i].y = r * sinf(angle);
+    }
+    vertices[n] = vertices[0];
+    dirty = true;
 }

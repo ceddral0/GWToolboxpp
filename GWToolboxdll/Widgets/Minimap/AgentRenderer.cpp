@@ -1264,31 +1264,33 @@ void AgentRenderer::Enqueue(const Shape_e shape, const GW::MapProp* agent, const
 void AgentRenderer::Enqueue(const Shape_e shape, const RenderPosition& pos, const float size, const Color color, const Color modifier)
 {
     if ((color & IM_COL32_A_MASK) == 0) return;
-
     const auto& shape_verts = shapes[shape].vertices;
-    const size_t num_v = shape_verts.size();
-    const size_t offset = vertices.size();
-    vertices.reserve(offset + num_v); // no-op if capacity already sufficient
+    vertices.reserve(vertices.size() + shape_verts.size());
 
-    for (size_t i = 0; i < num_v; i++) {
-        const Shape_Vertex& vert = shape_verts[i];
-        const GW::Vec2f calc_pos = Rotate(vert, pos.rotation_cos, pos.rotation_sin) * size + pos.position;
+    const DWORD c_dark = Colors::Sub(color, modifier);
+    const DWORD c_light = Colors::Add(color, modifier);
+    const DWORD c_center = Colors::Sub(color, IM_COL32(0, 0, 0, 50));
+
+    GW::Vec2f calc_pos;
+    for (const Shape_Vertex& vert : shape_verts) {
+        calc_pos.x = ((vert.x * pos.rotation_cos) - (vert.y * pos.rotation_sin)) * size + pos.position.x;
+        calc_pos.y = ((vert.x * pos.rotation_sin) + (vert.y * pos.rotation_cos)) * size + pos.position.y;
         DWORD c;
         switch (vert.modifier) {
             case Dark:
-                c = Colors::Sub(color, modifier);
+                c = c_dark;
                 break;
             case Light:
-                c = Colors::Add(color, modifier);
+                c = c_light;
                 break;
             case CircleCenter:
-                c = Colors::Sub(color, IM_COL32(0, 0, 0, 50));
+                c = c_center;
                 break;
             default:
                 c = color;
                 break;
         }
-        vertices.push_back({calc_pos.x, calc_pos.y, 0.f, c});
+        vertices.push_back({calc_pos.x, calc_pos.y, c});
     }
 }
 

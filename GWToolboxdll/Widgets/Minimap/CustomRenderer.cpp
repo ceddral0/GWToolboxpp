@@ -772,12 +772,10 @@ void CustomRenderer::CustomMarker::SyncGeometry()
         fill_circle.SetColor(colour);
         fill_circle.SetCenterColor(centre_color);
         fill_circle.SetRadius(1.f);
-        fill_circle.SetSegments(48);
     }
     else {
         line_circle.SetColor(colour);
         line_circle.SetRadius(1.f);
-        line_circle.SetSegments(48);
     }
 }
 
