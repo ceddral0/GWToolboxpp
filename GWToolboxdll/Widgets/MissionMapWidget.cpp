@@ -455,23 +455,12 @@ namespace {
         SetNavTarget(best_pos);
     }
 
-    void EnqueueEnemyMarker(const TrackedEnemy& enemy)
-    {
-        if (enemy.state == EnemyState::NotApplicable) return;
-        const float px = cached_px_to_game;
-        const float radius = 9.0f * px;
-        const float radius_outer = radius + px;
-        const DWORD color = enemy.state == EnemyState::Stale ? vq_color_enemy_stale : vq_color_enemy_alive;
-
-        enemy_vertex_buffer.push_back(D3DTeardrop(enemy.pos, radius_outer, enemy.rotation, vq_color_enemy_outline, vq_color_enemy_outline));
-        enemy_vertex_buffer.push_back(D3DTeardrop(enemy.pos, radius, enemy.rotation, color, color));
-    }
-
     constexpr float stale_range_sq = STALE_CHECK_RANGE * STALE_CHECK_RANGE;
+    D3DTeardrop teardrop_outline;
+    D3DTeardrop teardrop_fill;
+
     void UpdateEnemyTracking()
     {
-
-
         const auto map_id = GW::Map::GetMapID();
         const auto instance_type = GW::Map::GetInstanceType();
         if (map_id != tracked_enemies_map_id || instance_type != tracked_enemies_instance_type) {
@@ -529,9 +518,25 @@ namespace {
 
         if (nav_active) NavigateToClosestEnemy();
         enemy_vertex_buffer.clear();
-        // Stale first (drawn below alive)
+
+        const float radius = 9.0f * cached_px_to_game;
+        const float radius_outer = radius + cached_px_to_game;
+        teardrop_fill.SetRadius(radius);
+        teardrop_outline.SetRadius(radius_outer);
+        teardrop_outline.SetColor(vq_color_enemy_outline);
+
         for (size_t i = 0, len = highest_trackable_agent_id; i <= len; i++) {
-            EnqueueEnemyMarker(tracked_enemies_by_agent_id[i]);
+            auto& enemy = tracked_enemies_by_agent_id[i];
+            if (enemy.state == EnemyState::NotApplicable) continue;
+            const DWORD color = enemy.state == EnemyState::Stale ? vq_color_enemy_stale : vq_color_enemy_alive;
+            teardrop_fill.SetColor(color);
+            teardrop_fill.SetCenterColor(color);
+            teardrop_fill.SetPosition(enemy.pos);
+            teardrop_fill.SetRotation(enemy.rotation);
+            teardrop_outline.SetPosition(enemy.pos);
+            teardrop_outline.SetRotation(enemy.rotation);
+            enemy_vertex_buffer.push_back(teardrop_outline);
+            enemy_vertex_buffer.push_back(teardrop_fill);
         }
     }
 

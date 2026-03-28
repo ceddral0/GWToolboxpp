@@ -154,28 +154,86 @@ D3DCircle::D3DCircle(const D3DVec2f& center, float radius, float thickness, DWOR
     }
 }
 
-D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color, DWORD center_color)
+D3DTeardrop::D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color, DWORD center_color) : cos_r(cosf(rotation)), sin_r(sinf(rotation)), radius(radius)
 {
     type = D3DPT_TRIANGLELIST;
-    const float cos_r = cosf(rotation);
-    const float sin_r = sinf(rotation);
-    const auto vert = [&](float x, float y, DWORD c) -> D3DVertex {
-        const float rx = x * radius;
-        const float ry = y * radius;
-        return {pos.x + rx * cos_r - ry * sin_r, pos.y + rx * sin_r + ry * cos_r, 0.f, c};
-    };
+    constexpr size_t n = 8;
+    vertices.resize(n * 3);
+    for (size_t i = 2; i < vertices.size(); i += 3) {
+        vertices[i].x = pos.x;
+        vertices[i].y = pos.y;
+    }
+    RebuildRim();
+    SetColor(color);
+    SetCenterColor(center_color);
+}
+
+void D3DTeardrop::SetColor(DWORD c)
+{
+    if (vertices.empty() || vertices[0].color == c) return;
+    for (size_t i = 0; i < vertices.size(); i += 3) {
+        vertices[i + 0].color = c;
+        vertices[i + 1].color = c;
+    }
+    dirty = true;
+}
+
+void D3DTeardrop::SetCenterColor(DWORD c)
+{
+    if (vertices.empty() || vertices[2].color == c) return;
+    for (size_t i = 2; i < vertices.size(); i += 3) {
+        vertices[i].color = c;
+    }
+    dirty = true;
+}
+
+void D3DTeardrop::SetPosition(const D3DVec2f& pos)
+{
+    if (vertices.empty()) return;
+    const float dx = pos.x - vertices[2].x;
+    const float dy = pos.y - vertices[2].y;
+    if (dx == 0.f && dy == 0.f) return;
+    for (auto& v : vertices) {
+        v.x += dx;
+        v.y += dy;
+    }
+    dirty = true;
+}
+void D3DTeardrop::RebuildRim()
+{
     constexpr std::pair<float, float> rim[] = {
         {1.8f, 0.0f}, {0.7f, 0.7f}, {0.0f, 1.0f}, {-0.7f, 0.7f}, {-1.0f, 0.0f}, {-0.7f, -0.7f}, {0.0f, -1.0f}, {0.7f, -0.7f},
     };
     constexpr size_t n = std::size(rim);
-    const D3DVertex O = vert(0.f, 0.f, center_color);
-    vertices.resize(n * 3);
+    const float cx = vertices[2].x;
+    const float cy = vertices[2].y;
     for (size_t i = 0; i < n; i++) {
         const size_t base = i * 3;
-        vertices[base + 0] = vert(rim[i].first, rim[i].second, color);
-        vertices[base + 1] = vert(rim[(i + 1) % n].first, rim[(i + 1) % n].second, color);
-        vertices[base + 2] = O;
+        const auto& [ax, ay] = rim[i];
+        const auto& [bx, by] = rim[(i + 1) % n];
+        vertices[base + 0].x = cx + (ax * cos_r - ay * sin_r) * radius;
+        vertices[base + 0].y = cy + (ax * sin_r + ay * cos_r) * radius;
+        vertices[base + 1].x = cx + (bx * cos_r - by * sin_r) * radius;
+        vertices[base + 1].y = cy + (bx * sin_r + by * cos_r) * radius;
     }
+    dirty = true;
+}
+void D3DTeardrop::SetRadius(float r)
+{
+    if (vertices.empty() || radius == r) return;
+    radius = r;
+    RebuildRim();
+}
+
+void D3DTeardrop::SetRotation(float rotation)
+{
+    const float new_cos = cosf(rotation);
+    const float new_sin = sinf(rotation);
+    if (new_cos == cos_r && new_sin == sin_r) return;
+    cos_r = new_cos;
+    sin_r = new_sin;
+    if (vertices.empty()) return;
+    RebuildRim();
 }
 
 D3DFillCircle::D3DFillCircle(const D3DVec2f& center, float radius, DWORD color, DWORD center_color, int segments)

@@ -64,6 +64,11 @@ public:
         dirty = true;
     }
     bool empty() const { return vertices.empty(); }
+    virtual void push_back(const D3DVertexBuffer& other)
+    {
+        vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
+        dirty = true;
+    }
 
 protected:
     void UploadVertices(IDirect3DDevice9* device); // the memcpy logic
@@ -79,6 +84,7 @@ protected:
 
 class D3DTriangleBuffer : public D3DVertexBuffer {
 public:
+    using D3DVertexBuffer::push_back; // bring base overload into scope
     template <size_t N>
     void push_back(const D3DShape<N>& shape)
     {
@@ -92,24 +98,30 @@ public:
         vertices.insert(vertices.end(), tri.v, tri.v + 3);
         dirty = true;
     }
-    void push_back(const D3DTriangleBuffer& other)
-    {
-        vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
-        dirty = true;
-    }
 
     void reserve(size_t n) override { vertices.reserve(n * 3); }
 
     void Initialize(IDirect3DDevice9* device) override;
 };
 
-class D3DTeardrop : public D3DTriangleBuffer {
+class D3DTeardrop : public D3DVertexBuffer {
 public:
-    D3DTeardrop() = default;
-    D3DTeardrop(const D3DVec2f& pos, float radius, float rotation, DWORD color, DWORD center_color);
+    D3DTeardrop(const D3DVec2f& pos = {}, float radius = 10.f, float rotation = 0.f, DWORD color = 0xffffffff, DWORD center_color = 0x99999999);
+
+    void SetColor(DWORD c);
+    void SetCenterColor(DWORD c);
+    void SetPosition(const D3DVec2f& pos);
+    void RebuildRim();
+    void SetRotation(float rotation);
+    void SetRadius(float r);
+
+private:
+    float cos_r = 1.f;
+    float sin_r = 0.f;
+    float radius = 1.f;
 };
 
-struct D3DCircle : D3DTriangleBuffer {
+struct D3DCircle : public D3DTriangleBuffer {
     D3DCircle() = default;
     D3DCircle(const D3DVec2f& center, float radius, float thickness, DWORD color, int segment_count = 64);
 };
