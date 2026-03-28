@@ -1,35 +1,44 @@
 #include "stdafx.h"
 
-#include <GWCA/Context/WorldContext.h>
+#include <Defines.h>
+
 #include <GWCA/Managers/ChatMgr.h>
 #include <GWCA/Managers/StoCMgr.h>
 #include <GWCA/Managers/MapMgr.h>
+#include <GWCA/Managers/UIMgr.h>
 #include <GWCA/Packets/StoC.h>
 
 #include <Modules/FavorTrackerModule.h>
+#include <Modules/AudioSettings.h>
 #include <ImGuiAddons.h>
 #include <Timer.h>
 #include <Utils/ToolboxUtils.h>
 
-#define LOAD_BOOL(var) var = ini->GetBoolValue(Name(), #var, var);
-#define SAVE_BOOL(var) ini->SetBoolValue(Name(), #var, var);
-
 namespace {
-    // --- Settings ---
-    bool enabled = false;
+    bool enabled = true;
+    bool play_sound_on_favor = true;
+    char favor_sound_id[64] = "b3e00101";
     int poll_interval_seconds = 60;
 
-    // --- State ---
     uint32_t favor_minutes = 0;
     bool favor_active = false;
     clock_t last_poll_time = 0;
-    clock_t suppress_until = 0; // suppress favor chat messages until this time
+    clock_t suppress_until = 0;
 
-    // --- Hooks ---
     GW::HookEntry OnMessageServer_Entry;
+    GW::HookEntry OnUIMessage_Entry;
+    
+    std::wstring HexToWString(const char* hex)
+    {
+        std::wstring result;
+        const size_t len = strlen(hex);
+        for (size_t i = 0; i + 3 < len; i += 4) {
+            char word[5] = { hex[i], hex[i+1], hex[i+2], hex[i+3], '\0' };
+            result.push_back(static_cast<wchar_t>(strtoul(word, nullptr, 16)));
+        }
+        return result;
+    }
 
-    // Extract the numeric value from an encoded message that ends with 0x101 0x100+value
-    // Returns 0 if pattern not found
     uint32_t ExtractEncodedValue(const wchar_t* msg)
     {
         if (!msg) return 0;
@@ -41,34 +50,42 @@ namespace {
         return 0;
     }
 
-    // Parse a favor message from the message core buffer
-    // Returns true if the message was a favor message we handled
+    void SetFavorActive(bool active, uint32_t minutes = 0)
+    {
+        const bool was_active = favor_active;
+        favor_active = active;
+        favor_minutes = minutes;
+
+        if (active && !was_active && play_sound_on_favor) {
+            const auto sound = HexToWString(favor_sound_id);
+            if (!sound.empty()) {
+                AudioSettings::PlaySound(sound.c_str());
+            }
+        }
+    }
+
     bool ParseFavorMessage(const wchar_t* msg)
     {
         if (!msg || !*msg) return false;
 
-        // /favor command response: 0x8102 0x223F ... 0x101 0x100+minutes
-        // "x minutes of favor remaining"
+        // "x minutes of favor of the gods remaining" as a result of /favor command
         if (msg[0] == 0x8102 && msg[1] == 0x223F) {
-            favor_minutes = ExtractEncodedValue(msg);
-            favor_active = favor_minutes > 0;
+            const auto mins = ExtractEncodedValue(msg);
+            SetFavorActive(mins > 0, mins);
             return true;
         }
 
         if (msg[0] == 0x8101) {
             switch (msg[1]) {
-                // Broadcast: "x minutes of favor of the gods remaining"
-                // 0x8101 0x7B91 0xC686 0xE490 0x6922 0x101 0x100+value
-                case 0x7B91:
-                    favor_minutes = ExtractEncodedValue(msg);
-                    favor_active = favor_minutes > 0;
+                // "x minutes of favor of the gods remaining" (broadcast)
+                case 0x7B91: {
+                    const auto mins = ExtractEncodedValue(msg);
+                    SetFavorActive(mins > 0, mins);
                     return true;
-
-                // Broadcast: "x more achievements must be performed to earn favor"
-                // 0x8101 0x7B92 0x8B0A 0x8DB5 0x5135 0x101 0x100+value
+                }
+                // "x more achievements must be performed to earn the favor of the gods" (broadcast)
                 case 0x7B92:
-                    favor_minutes = 0;
-                    favor_active = false;
+                    SetFavorActive(false);
                     return true;
             }
         }
@@ -77,36 +94,70 @@ namespace {
             switch (msg[1]) {
                 // "The gods have blessed the world with their favor"
                 case 0x23E3:
-                    favor_active = true;
-                    // We don't know exact minutes from this message, query it
+                    SetFavorActive(true, favor_minutes);
                     return true;
 
                 // "The world no longer has the favor of the gods"
                 case 0x23E4:
-                    favor_minutes = 0;
-                    favor_active = false;
+                    SetFavorActive(false);
                     return true;
             }
         }
 
         return false;
     }
-
-    void OnMessageServer(GW::HookStatus* status, GW::Packet::StoC::MessageServer*)
+    
+    void OnMessageServer(GW::HookStatus*, GW::Packet::StoC::MessageServer*)
     {
         const wchar_t* msg = ToolboxUtils::GetMessageCore();
-        if (ParseFavorMessage(msg) && suppress_until && TIMER_INIT() <= suppress_until) {
+        ParseFavorMessage(msg);
+    }
+    
+    void OnUIMessage(GW::HookStatus* status, GW::UI::UIMessage message_id, void* wparam, void*)
+    {
+        if (!suppress_until || TIMER_INIT() > suppress_until) return;
+        if (status->blocked) return;
+
+        GW::Chat::Channel channel = GW::Chat::Channel::CHANNEL_UNKNOW;
+
+        switch (message_id) {
+            case GW::UI::UIMessage::kWriteToChatLog: {
+                const auto packet = static_cast<GW::UI::UIPacket::kWriteToChatLog*>(wparam);
+                channel = packet->channel;
+            } break;
+            case GW::UI::UIMessage::kPrintChatMessage: {
+                const auto packet = static_cast<GW::UI::UIPacket::kPrintChatMessage*>(wparam);
+                channel = packet->channel;
+            } break;
+            case GW::UI::UIMessage::kLogChatMessage: {
+                const auto packet = static_cast<GW::UI::UIPacket::kLogChatMessage*>(wparam);
+                channel = packet->channel;
+            } break;
+            default:
+                return;
+        }
+
+        if (channel == GW::Chat::Channel::CHANNEL_GLOBAL) {
             status->blocked = true;
         }
     }
 
-} // namespace
+}
 
 void FavorTrackerModule::Initialize()
 {
     ToolboxModule::Initialize();
 
     GW::StoC::RegisterPacketCallback<GW::Packet::StoC::MessageServer>(&OnMessageServer_Entry, OnMessageServer);
+
+    constexpr GW::UI::UIMessage ui_messages[] = {
+        GW::UI::UIMessage::kPrintChatMessage,
+        GW::UI::UIMessage::kLogChatMessage,
+        GW::UI::UIMessage::kWriteToChatLog
+    };
+    for (const auto message_id : ui_messages) {
+        GW::UI::RegisterUIMessageCallback(&OnUIMessage_Entry, message_id, OnUIMessage, -0x8000);
+    }
 }
 
 void FavorTrackerModule::Update(float)
@@ -116,7 +167,7 @@ void FavorTrackerModule::Update(float)
 
     if (TIMER_DIFF(last_poll_time) >= poll_interval_seconds * 1000) {
         last_poll_time = TIMER_INIT();
-        suppress_until = TIMER_INIT() + 3000; // suppress favor chat for 3 seconds
+        suppress_until = TIMER_INIT() + 2000;
         GW::Chat::SendChat('/', L"favor");
     }
 }
@@ -126,6 +177,7 @@ void FavorTrackerModule::SignalTerminate()
     ToolboxModule::SignalTerminate();
 
     GW::StoC::RemoveCallback<GW::Packet::StoC::MessageServer>(&OnMessageServer_Entry);
+    GW::UI::RemoveUIMessageCallback(&OnUIMessage_Entry);
 }
 
 uint32_t FavorTrackerModule::GetFavorMinutes()
@@ -142,6 +194,12 @@ void FavorTrackerModule::LoadSettings(ToolboxIni* ini)
 {
     ToolboxModule::LoadSettings(ini);
     LOAD_BOOL(enabled);
+    LOAD_BOOL(play_sound_on_favor);
+    const char* sound = ini->GetValue(Name(), "favor_sound_id", favor_sound_id);
+    if (sound) {
+        strncpy(favor_sound_id, sound, sizeof(favor_sound_id) - 1);
+        favor_sound_id[sizeof(favor_sound_id) - 1] = '\0';
+    }
     poll_interval_seconds = ini->GetLongValue(Name(), "poll_interval_seconds", poll_interval_seconds);
 }
 
@@ -149,6 +207,8 @@ void FavorTrackerModule::SaveSettings(ToolboxIni* ini)
 {
     ToolboxModule::SaveSettings(ini);
     SAVE_BOOL(enabled);
+    SAVE_BOOL(play_sound_on_favor);
+    ini->SetValue(Name(), "favor_sound_id", favor_sound_id);
     ini->SetLongValue(Name(), "poll_interval_seconds", poll_interval_seconds);
 }
 
@@ -157,6 +217,11 @@ void FavorTrackerModule::DrawSettingsInternal()
     ImGui::Checkbox("Enable Favor Tracking", &enabled);
     ImGui::ShowHelp("Periodically runs /favor to check Favor of the Gods status. Automated queries are hidden from chat.");
 
+    ImGui::Checkbox("Play sound on favor activation", &play_sound_on_favor);
+    if (play_sound_on_favor) {
+        ImGui::InputText("Sound ID (hex)", favor_sound_id, sizeof(favor_sound_id));
+        ImGui::ShowHelp("Hex-encoded GW sound ID from the Audio Settings sound log. Default is b3e00101 (level-up sound). Set to empty to disable");
+    }
     ImGui::InputInt("Poll Interval (seconds)", &poll_interval_seconds);
     if (poll_interval_seconds < 10) poll_interval_seconds = 10;
 

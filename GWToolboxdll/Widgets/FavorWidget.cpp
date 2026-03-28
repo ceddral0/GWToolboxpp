@@ -10,7 +10,7 @@
 #include <Utils/FontLoader.h>
 
 namespace {
-    float text_size = 32.f;
+    float text_size = 24.f;
 }
 
 void FavorWidget::Draw(IDirect3DDevice9*)
