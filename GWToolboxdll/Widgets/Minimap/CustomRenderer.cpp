@@ -20,6 +20,7 @@
 #include <Color.h>
 #include <GWToolbox.h>
 #include <Utils/GuiUtils.h>
+#include <Utils/ToolboxUtils.h>
 
 #define BTN_WIDTH 20.0f
 
@@ -1002,12 +1003,18 @@ void CustomRenderer::DrawCustomMarkers(IDirect3DDevice9* device)
 void CustomRenderer::DrawCustomLines(const IDirect3DDevice9*)
 {
     const auto doa_outpost = GW::Map::GetInstanceType() != GW::Constants::InstanceType::Explorable && GW::Map::GetMapID() == GW::Constants::MapID::Domain_of_Anguish;
-
+    const auto my_pos = GW::PlayerMgr::GetPlayerPosition();
     for (const auto line : lines) {
         // Draw everywhere besides the DoA outpost. Only draw the lines with draw_everywhere in DoA
         if (line->visible && line->draw_on_minimap && (line->map == GW::Constants::MapID::None || line->map == GW::Map::GetMapID()) &&
             (!doa_outpost || line->draw_everywhere)) {
-            EnqueueVertex(line->p1.x, line->p1.y, line->color);
+            if (line->from_player_pos && my_pos) {
+                EnqueueVertex(my_pos->x, my_pos->y, line->color);
+            }
+            else {
+                EnqueueVertex(line->p1.x, line->p1.y, line->color);
+            }
+            
             EnqueueVertex(line->p2.x, line->p2.y, line->color);
         }
     }

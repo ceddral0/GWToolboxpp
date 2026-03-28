@@ -104,6 +104,16 @@ namespace {
     GW::Constants::MapID border_map_id = static_cast<GW::Constants::MapID>(0);
     float border_cached_zoom = 0.0f; // zoom level used when static geometry was last built
 
+    // Helper function to limit some functions to only check every n frames
+    bool FrameRateCheck(clock_t& last_checked, clock_t fps) {
+        const auto now = TIMER_INIT();
+        if (now - last_checked > CLOCKS_PER_SEC / fps) {
+            last_checked = now;
+            return true;
+        }
+        return false;
+    }
+
 
     const D3DMATRIX IDENTITY_MATRIX = {{1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f}};
 
@@ -114,9 +124,11 @@ namespace {
         float ax, ay;
         float bx, by;
         bool valid = false;
+        clock_t last_rebuild = TIMER_INIT();
 
         void Rebuild()
         {
+            
             valid = false;
 
             // Sample at three game positions that are guaranteed to be close together.
@@ -165,6 +177,11 @@ namespace {
 
     void UpdateExploration(const GW::GamePos& player_pos)
     {
+        // Movement range check
+        static GW::GamePos last_check = {};
+        if (GW::GetSquareDistance(last_check, player_pos) < GW::Constants::SqrRange::Adjacent) return;
+        last_check = player_pos;
+
         const auto map_id = GW::Map::GetMapID();
         const auto instance_type = GW::Map::GetInstanceType();
         if (map_id != explored_map_id || instance_type != explored_instance_type) {
@@ -174,18 +191,16 @@ namespace {
             explored_instance_type = instance_type;
         }
 
-        if (instance_type != GW::Constants::InstanceType::Explorable) return;
-
         // Allocate parallel to walkable grid when first entering an explorable area
         if (!explored_cells && cached_walkable_grid_size > 0) {
             explored_cells = new bool[cached_walkable_grid_size](); // zero-init
         }
         if (!explored_cells) return;
 
-        const int range_cells = static_cast<int>(COMPASS_RANGE / EXPLORE_CELL_SIZE) + 1;
+        constexpr int range_cells = static_cast<int>(COMPASS_RANGE / EXPLORE_CELL_SIZE) + 1;
         const int player_cx = static_cast<int>(floorf(player_pos.x / EXPLORE_CELL_SIZE));
         const int player_cy = static_cast<int>(floorf(player_pos.y / EXPLORE_CELL_SIZE));
-        const float range_sq = COMPASS_RANGE * COMPASS_RANGE;
+        constexpr float range_sq = COMPASS_RANGE * COMPASS_RANGE;
 
         for (int dy = -range_cells; dy <= range_cells; dy++) {
             for (int dx = -range_cells; dx <= range_cells; dx++) {
@@ -455,6 +470,8 @@ namespace {
     constexpr float stale_range_sq = STALE_CHECK_RANGE * STALE_CHECK_RANGE;
     void UpdateEnemyTracking()
     {
+
+
         const auto map_id = GW::Map::GetMapID();
         const auto instance_type = GW::Map::GetInstanceType();
         if (map_id != tracked_enemies_map_id || instance_type != tracked_enemies_instance_type) {
@@ -844,10 +861,6 @@ namespace {
         return explored_cells[idx];
     }
 
-
-    int last_fog_player_cx = INT_MIN;
-    int last_fog_player_cy = INT_MIN;
-
     void BuildFogGeometry()
     {
         unexplored_area.clear();
@@ -925,80 +938,24 @@ namespace {
         minimap_lines.clear();
         minimap_lines.reserve(lines.size());
         if (lines.empty()) return;
+        const auto player_pos = GW::PlayerMgr::GetPlayerPosition();
         const float LINE_HALF_THICKNESS = 1.f * cached_px_to_game;
         for (const auto& line : lines) {
             if (!line->visible) continue;
             if (!line->draw_on_mission_map && !(draw_all_minimap_lines && line->draw_on_minimap) && !(draw_all_terrain_lines && line->draw_on_terrain)) continue;
             if (line->map != map_id) continue;
-            minimap_lines.push_back(D3DLine(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color)));
+            if (line->from_player_pos && player_pos) {
+                minimap_lines.push_back(D3DLine(*player_pos, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color)));
+            }
+            else {
+                minimap_lines.push_back(D3DLine(line->p1, line->p2, LINE_HALF_THICKNESS, static_cast<DWORD>(line->color)));
+            }
+            
         }
     }
 
     void RebuildCompassCircle() {
         compass_circle = D3DCircle({0.f, 0.f}, COMPASS_RANGE, COMPASS_CIRCLE_THICKNESS_PX * cached_px_to_game, (DWORD)vq_color_compass, COMPASS_CIRCLE_SEGMENTS);
-    }
-
-    // -----------------------------------------------------------------------
-    // Draw — builds geometry into VertexBuffers, then submits
-    // -----------------------------------------------------------------------
-    void Draw(IDirect3DDevice9* dx_device)
-    {
-        if (!HookMissionMapFrame()) return;
-        if (!InitializeMissionMapParameters()) return;
-        g2s.Rebuild();
-        if (!g2s.valid) return;
-
-        should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
-
-        // -----------------------------------------------------------------------
-        // Custom renderer lines — screen space
-        // -----------------------------------------------------------------------
-        
-        const auto map_id = GW::Map::GetMapID();
-
-        const bool map_changed = map_id != border_map_id;
-        const bool zoom_changed = mission_map_zoom != border_cached_zoom;
-
-        if (map_changed || zoom_changed) {
-            border_cached_zoom = mission_map_zoom;
-            cached_px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : EXPLORE_CELL_SIZE / 600.0f;
-            BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
-            BuildFogGeometry();
-            RebuildCompassCircle();
-            if (map_changed) {
-                border_map_id = map_id;
-                last_fog_player_cx = INT_MIN;
-                last_fog_player_cy = INT_MIN;
-                RebuildMapBorder(); // rebuilds walkable grid + border segments
-            }
-        }
-        EnqueueMinimapLines(map_id);    
-
-        if (should_draw_vq_overlay) {
-            // Fog overlay + frontier — rebuilt only when player cell changes
-            {
-                const auto player = GW::Agents::GetControlledCharacter();
-                if (show_vq_overlay && player) {
-                    const int player_cx = static_cast<int>(floorf(player->pos.x / EXPLORE_CELL_SIZE));
-                    const int player_cy = static_cast<int>(floorf(player->pos.y / EXPLORE_CELL_SIZE));
-
-                    if (player_cx != last_fog_player_cx || player_cy != last_fog_player_cy) {
-                        // Don't cache position until explored_cells is ready,
-                        // so we keep rebuilding until exploration data arrives.
-                        if (explored_cells) {
-                            last_fog_player_cx = player_cx;
-                            last_fog_player_cy = player_cy;
-                        }
-                        BuildFogGeometry();
-                    }
-                }
-            }
-        }
-
-        SubmitVertexBuffers(dx_device);
-        if (should_draw_vq_overlay) 
-            DrawEnemyCountLabel();
-        DrawVanquishToggleButton();
     }
 } // namespace
 
@@ -1038,21 +995,53 @@ void MissionMapWidget::SaveSettings(ToolboxIni* ini)
 
 void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
 {
-    if (visible) ::Draw(dx_device);
-    HookMissionMapFrame();
+    if (!visible) return;
+    SubmitVertexBuffers(dx_device);
+    if (should_draw_vq_overlay) 
+        DrawEnemyCountLabel();
+    DrawVanquishToggleButton();
 }
 void MissionMapWidget::Update(float)
 {
-    if (ToolboxUtils::IsExplorable()) {
-        static DWORD last_tracking_tick = 0;
-        const DWORD now = GetTickCount();
+    // Frame rate check
+    static clock_t last_check = TIMER_INIT();
+    if (!FrameRateCheck(last_check, 30)) return;
 
-        if (now - last_tracking_tick >= 100) { // 10Hz
-            last_tracking_tick = now;
-            UpdateEnemyTracking();
-            if (const auto player = GW::Agents::GetControlledCharacter()) {
-                UpdateExploration(player->pos);
-            }
+    if (!HookMissionMapFrame()) return;
+    if (!InitializeMissionMapParameters()) return;
+    g2s.Rebuild();
+    if (!g2s.valid) return;
+
+    should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
+
+    // -----------------------------------------------------------------------
+    // Custom renderer lines — screen space
+    // -----------------------------------------------------------------------
+
+    const auto map_id = GW::Map::GetMapID();
+
+    const bool map_changed = map_id != border_map_id;
+    const bool zoom_changed = mission_map_zoom != border_cached_zoom;
+
+    if (map_changed || zoom_changed) {
+        border_cached_zoom = mission_map_zoom;
+        cached_px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : EXPLORE_CELL_SIZE / 600.0f;
+        BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
+        BuildFogGeometry();
+        RebuildCompassCircle();
+        if (map_changed) {
+            border_map_id = map_id;
+            RebuildMapBorder(); // rebuilds walkable grid + border segments
+        }
+    }
+
+    EnqueueMinimapLines(map_id);    
+
+    if (ToolboxUtils::IsExplorable()) {
+        UpdateEnemyTracking();
+        if (const auto player = GW::Agents::GetControlledCharacter()) {
+            UpdateExploration(player->pos);
+            BuildFogGeometry();
         }
     } else {
         if (nav_active) StopNavigating();

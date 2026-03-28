@@ -201,31 +201,41 @@ namespace {
 
         void Recalculate(const GW::GamePos& from)
         {
+            if (IsCalculating()) return;
+            calculating = TIMER_INIT();
+            // If we're not calculating, and the starting point hasn't changed, and the destination hasn't changed, then we've already got our path
             if (calculated_at &&
                 from == calculated_from && calculated_to == original_quest_marker) {
-                calculating = TIMER_INIT();
-                OnQuestPathRecalculated(waypoints, (void*)quest_id); // No need to recalculate
+                OnQuestPathRecalculated(waypoints, (void*)quest_id);
                 return;
             }
-            calculated_from = from;
-            calculated_to = original_quest_marker;
+
+            // If quest marker has changed to infinity; clear any current markers
             if (original_quest_marker.x == INFINITY) {
                 if (waypoints.size()) {
-                    // Quest marker has changed to infinity; clear any current markers
                     waypoints.clear();
-                    calculating = TIMER_INIT();
                     OnQuestPathRecalculated(waypoints, (void*)quest_id); // No need to recalculate
                 }
                 return;
             }
-            calculating = PathfindingWindow::CalculatePath(calculated_from, calculated_to, OnQuestPathRecalculated, (void*)quest_id);
-            if (!IsCalculating()) {
+            // Trigger a recalculation on another thread, and return the time that it started as calculating.
+            calculating = PathfindingWindow::CalculatePath(from, original_quest_marker, OnQuestPathRecalculated, (void*)quest_id);
+            if (calculating) {
+                calculated_from = from;
+                calculated_to = original_quest_marker;
+            }
+            else {
+                // If calculating wasn't a valid timestamp, assume that it was rejected and reset for next loop
                 calculated_at = 0;
             }
         }
 
         bool Update(const GW::GamePos& from)
         {
+            static clock_t last_check = TIMER_INIT();
+            if (TIMER_DIFF(last_check) < 33) return false;
+            last_check = TIMER_INIT();
+
             if (IsCalculating()) {
                 return false;
             }
@@ -263,6 +273,7 @@ namespace {
                 calculated_from = from;
                 UpdateUI();
             }
+            UpdateUI();
             return false;
         }
 
