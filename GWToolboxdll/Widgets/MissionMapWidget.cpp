@@ -85,13 +85,6 @@ namespace {
 
     std::vector<BorderSegment> cached_border_segments;
 
-    // -----------------------------------------------------------------------
-    // Vertex buffer types and arena
-    // -----------------------------------------------------------------------
-
-
-
-
     // Static cached circle — built once per map/zoom change, centred on game origin
     constexpr int COMPASS_CIRCLE_SEGMENTS = 64;
     constexpr float COMPASS_CIRCLE_THICKNESS_PX = 0.5f;
@@ -448,16 +441,11 @@ namespace {
             tracked_enemies_instance_type = instance_type;
         }
 
-        const auto player = GW::Agents::GetControlledCharacter();
-
-        const auto* agents = player ? GW::Agents::GetAgentArray() : nullptr;
+        const auto player_pos = GW::PlayerMgr::GetPlayerPosition();
+        const auto* agents = player_pos ? GW::Agents::GetAgentArray() : nullptr;
         if (!agents) return;
 
-        //const auto& player_pos = player->pos;
-
         if (tracked_enemies_by_agent_id.size() < agents->size()) tracked_enemies_by_agent_id.resize(agents->size());
-
-        const auto& player_pos = player->pos;
 
         for (size_t agent_id = 0, len = agents->size(); agent_id < len; agent_id++) {
             const auto agent = agents->at(agent_id);
@@ -466,9 +454,7 @@ namespace {
                 // Agent not in radar — only mark stale if we're close enough to
                 // their last known position that we should be able to see them
                 if (tracked.state == EnemyState::Alive) {
-                    const float dx = tracked.pos.x - player_pos.x;
-                    const float dy = tracked.pos.y - player_pos.y;
-                    if (dx * dx + dy * dy < stale_range_sq) {
+                    if (GW::GetSquareDistance(*player_pos,tracked.pos) < stale_range_sq) {
                         tracked.state = EnemyState::Stale;
                     }
                 }
@@ -498,9 +484,7 @@ namespace {
         for (size_t agent_id = agents->size(), len = tracked_enemies_by_agent_id.size(); agent_id < len; agent_id++) {
             auto& tracked = tracked_enemies_by_agent_id[agent_id];
             if (tracked.state == EnemyState::Alive) {
-                const float dx = tracked.pos.x - player_pos.x;
-                const float dy = tracked.pos.y - player_pos.y;
-                if (dx * dx + dy * dy < stale_range_sq) {
+                if (GW::GetSquareDistance(*player_pos, tracked.pos) < stale_range_sq) {
                     tracked.state = EnemyState::Stale;
                 }
             }
@@ -588,10 +572,10 @@ namespace {
     {
         valid = false;
 
-        const auto* player = GW::Agents::GetControlledCharacter();
-        if (!player) return;
-        const float px = player->pos.x;
-        const float py = player->pos.y;
+        const auto player_pos = GW::PlayerMgr::GetPlayerPosition();
+        if (!player_pos) return;
+        auto px = player_pos->x;
+        auto py = player_pos->y;
 
         // Derive basis vectors by sampling two nearby points.
         // GamePosToMissionMapScreenPos goes through world map coords, and the
@@ -734,56 +718,6 @@ namespace {
         // clang-format on
         return m;
     }
-
-
-
-    // Build a world transform that maps raw game coords (x, y) directly to screen
-    // pixels, so VQ geometry can be built in game space with no per-vertex projection.
-    //
-    // The full chain is:
-    //   game -> world_map  (WorldMapWidget::GamePosToWorldMap — linear scale+offset)
-    //   world_map -> screen (pan, scale, zoom as in WorldMapCoordsToMissionMapScreenPos)
-    //
-    // We sample three anchor points to recover the affine coefficients, then pack
-    // them into a D3D world matrix. The ortho projection handles the final
-    // screen->NDC step as before.
-    //
-    // Returns false if the world-map transform is unavailable this frame.
-    bool BuildGameToScreenWorldMatrix(D3DMATRIX& out)
-    {
-        // Sample the transform at the origin and one unit along each axis
-        const GW::GamePos g00 = {0.f, 0.f, 0};
-        const GW::GamePos g10 = {1.f, 0.f, 0};
-        const GW::GamePos g01 = {0.f, 1.f, 0};
-
-        GW::Vec2f s00, s10, s01;
-        if (!GamePosToMissionMapScreenPos(g00, s00) || !GamePosToMissionMapScreenPos(g10, s10) || !GamePosToMissionMapScreenPos(g01, s01)) return false;
-
-        // Basis vectors: screen delta per 1 game unit along each axis
-        const float ax = s10.x - s00.x; // d(screen.x)/d(game.x)
-        const float ay = s10.y - s00.y; // d(screen.y)/d(game.x)
-        const float bx = s01.x - s00.x; // d(screen.x)/d(game.y)
-        const float by = s01.y - s00.y; // d(screen.y)/d(game.y)
-
-        // Row-major D3D world matrix (applied as: screen_pos = game_pos * M):
-        //   row0 = (ax, ay, 0, 0)    <- game.x contribution
-        //   row1 = (bx, by, 0, 0)    <- game.y contribution
-        //   row2 = (0,  0,  1, 0)    <- z pass-through (unused for 2D overlay)
-        //   row3 = (tx, ty, 0, 1)    <- translation (screen pos of game origin)
-        // clang-format off
-        out = {{
-            ax,     ay,    0.f, 0.f,
-            bx,     by,    0.f, 0.f,
-            0.f,    0.f,   1.f, 0.f,
-            s00.x,  s00.y, 0.f, 1.f
-        }};
-        // clang-format on
-        return true;
-    }
-    
-
-
-
 
     // -----------------------------------------------------------------------
     // DrawEnemyCountLabel — ImGui overlay showing VQ kill counts
@@ -1049,10 +983,6 @@ void MissionMapWidget::Update(float)
     // Frame rate check
     static clock_t last_check = TIMER_INIT();
     if (!FrameRateCheck(last_check, 30)) return;
-
-
-
-
 
     should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
 
