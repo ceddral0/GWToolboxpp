@@ -276,35 +276,36 @@ namespace {
         return sound_file_by_model_file_id[npc->model_file_id];
     }
 
-    Gender GetGenderByFileId(const uint32_t file_id)
+Gender GetGenderByFileId(const uint32_t file_id)
     {
         switch (file_id) {
-            case 0x13fdb:
-            case 0x2f15d:
-            case 0x13f6f:
-            case 0x16dfc:
+            case 0x4f19:
+            case 0x6ef5:
+            case 0x8b56:
+            case 0x12b3d:
             case 0x13e25:
             case 0x13eaa:
+            case 0x13ef3:
+            case 0x13f49:
+            case 0x13f6f:
+            case 0x13fdb:
+            case 0x16dfc:
+            case 0x17390:
+            case 0x2d145:
+            case 0x2f15d:
             case 0x2f1a1:
             case 0x37614:
             case 0x37794:
-            case 0x13EF3:
-            case 0x8b56:
-            case 0x17390:
-            case 0x12b3d:
-            case 0x6ef5:
-            case 0x4f19:
             case 0x4a4a8:
-            case 0x2D145:
                 return Gender::Male;
-            case 0x2f17e:
             case 0x97fa:
-            case 0x13f93:
-            case 0x13f22:
             case 0x13e4f:
             case 0x13ece:
+            case 0x13f22:
+            case 0x13f93:
             case 0x16dcf:
             case 0x203e4:
+            case 0x2f17e:
             case 0x4541c:
             case 0x4c47a:
                 return Gender::Female;
