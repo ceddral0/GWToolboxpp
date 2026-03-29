@@ -126,29 +126,7 @@ namespace {
         bool valid = false;
         clock_t last_rebuild = TIMER_INIT();
 
-        void Rebuild()
-        {
-            
-            valid = false;
-
-            // Sample at three game positions that are guaranteed to be close together.
-            // We use absolute game coords 0,0 for the anchor but measure the basis
-            // vectors using a step size large enough to avoid float precision issues
-            // at the world->screen transform level, then normalise back to per-unit.
-            constexpr float STEP = 1000.f; // large enough for precision, small enough to stay in map
-
-            GW::Vec2f s00, s10, s01;
-            if (!GamePosToMissionMapScreenPos({0.f, 0.f, 0}, s00) || !GamePosToMissionMapScreenPos({STEP, 0.f, 0}, s10) || !GamePosToMissionMapScreenPos({0.f, STEP, 0}, s01)) return;
-
-            ox = s00.x;
-            oy = s00.y;
-            // Divide by step to get per-unit basis vectors
-            ax = (s10.x - s00.x) / STEP;
-            ay = (s10.y - s00.y) / STEP;
-            bx = (s01.x - s00.x) / STEP;
-            by = (s01.y - s00.y) / STEP;
-            valid = true;
-        }
+        void Rebuild(); // defined after namespace variables
 
         void Project(float gx, float gy, float& sx, float& sy) const
         {
@@ -604,6 +582,45 @@ namespace {
     {
         GW::Vec2f world_map_pos;
         return WorldMapWidget::GamePosToWorldMap(game_map_position, world_map_pos) && WorldMapCoordsToMissionMapScreenPos(world_map_pos, screen_coords);
+    }
+
+    void GameToScreenBasis::Rebuild()
+    {
+        valid = false;
+
+        const auto* player = GW::Agents::GetControlledCharacter();
+        if (!player) return;
+        const float px = player->pos.x;
+        const float py = player->pos.y;
+
+        // Derive basis vectors by sampling two nearby points.
+        // GamePosToMissionMapScreenPos goes through world map coords, and the
+        // differences cancel out any constant offset errors (e.g. underground
+        // maps where pan_offset is not in world map coordinates).
+        constexpr float STEP = 1000.f;
+        GW::Vec2f s00, s10, s01;
+        if (!GamePosToMissionMapScreenPos({px, py, 0}, s00) ||
+            !GamePosToMissionMapScreenPos({px + STEP, py, 0}, s10) ||
+            !GamePosToMissionMapScreenPos({px, py + STEP, 0}, s01)) return;
+
+        ax = (s10.x - s00.x) / STEP;
+        ay = (s10.y - s00.y) / STEP;
+        bx = (s01.x - s00.x) / STEP;
+        by = (s01.y - s00.y) / STEP;
+
+        // Compute origin from the player's known mission map position,
+        // not from the world-map-based s00 which is wrong for underground maps.
+        const auto* mm_ctx = GW::Map::GetMissionMapContext();
+        if (!mm_ctx || !mm_ctx->h003c) return;
+        const GW::Vec2f mm_pos = mm_ctx->h003c->player_mission_map_pos;
+        const GW::Vec2f mm_offset = mm_pos - current_pan_offset;
+        const GW::Vec2f mm_scaled = {mm_offset.x * mission_map_scale.x, mm_offset.y * mission_map_scale.y};
+        const GW::Vec2f player_screen = {mm_scaled.x * mission_map_zoom + mission_map_screen_pos.x,
+                                         mm_scaled.y * mission_map_zoom + mission_map_screen_pos.y};
+
+        ox = player_screen.x - px * ax - py * bx;
+        oy = player_screen.y - px * ay - py * by;
+        valid = true;
     }
 
     void Draw(IDirect3DDevice9*);
