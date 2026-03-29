@@ -719,7 +719,7 @@ namespace {
         if (!show_vq_overlay) return;
 
         int alive_count = 0, stale_count = 0;
-        for (size_t i = 0, len = highest_trackable_agent_id; i < len;i++) {
+        for (size_t i = 0, len = highest_trackable_agent_id; i <= len; i++) {
             const auto& enemy = tracked_enemies_by_agent_id[i];
             if (enemy.state == EnemyState::Alive)
                 alive_count++;
