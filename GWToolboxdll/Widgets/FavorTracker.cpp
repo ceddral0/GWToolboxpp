@@ -21,11 +21,14 @@
 
 namespace {
 
+    constexpr uint32_t MAX_ACHIEVEMENTS_NEEDED_FOR_FAVOR = 20;
+
     float text_size = 24.f;
     Color text_color = IM_COL32_WHITE;
     bool hide_if_no_favor = false;
 
-    uint32_t last_favor = 0;
+    uint32_t last_favor_minutes = 0;
+    uint32_t last_favor_achievements_needed = 0;
     std::string favor_str;
 
     bool enabled = true;
@@ -68,7 +71,7 @@ namespace {
 
     void SetFavorActive(uint32_t minutes = 0, uint32_t achievements_needed = 0)
     {
-        if (minutes == favor_minutes_remaining) return;
+        if (minutes == favor_minutes_remaining && achievements_needed == achievements_needed_for_favor) return;
 
         const bool is_active = minutes > 0;
         const bool was_active = favor_minutes_remaining > 0;
@@ -226,9 +229,16 @@ void FavorTracker::Update(float)
     static clock_t fps_check = TIMER_INIT();
     if (!ToolboxUtils::FrameRateCheck(fps_check, 10)) return;
     const uint32_t minutes = GetFavorMinutes();
-    if (last_favor == minutes) return;
-    last_favor = minutes;
-    GW::UI::AsyncDecodeStrS(ToolboxUtils::TimeToEncString(minutes * 60).c_str(), &favor_str);
+    const uint32_t achievements_needed = GetFavorAchievementsNeeded();
+    if (last_favor_minutes == minutes && last_favor_achievements_needed == achievements_needed) return;
+    last_favor_minutes = minutes;
+    last_favor_achievements_needed = achievements_needed;
+    if (minutes) {
+        GW::UI::AsyncDecodeStrS(ToolboxUtils::TimeToEncString(minutes * 60).c_str(), &favor_str);
+    }
+    else {
+        favor_str = std::format("{}/{}", MAX_ACHIEVEMENTS_NEEDED_FOR_FAVOR - achievements_needed, MAX_ACHIEVEMENTS_NEEDED_FOR_FAVOR);
+    }
 }
 
 void FavorTracker::LoadSettings(ToolboxIni* ini)
@@ -297,6 +307,10 @@ void FavorTracker::DrawSettingsInternal()
 uint32_t FavorTracker::GetFavorMinutes()
 {
     return favor_minutes_remaining;
+}
+uint32_t FavorTracker::GetFavorAchievementsNeeded()
+{
+    return achievements_needed_for_favor;
 }
 
 const wchar_t* FavorTracker::GetFavorMessageW()

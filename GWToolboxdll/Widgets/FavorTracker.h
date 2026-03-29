@@ -28,6 +28,7 @@ public:
     void SignalTerminate() override;
 
     static uint32_t GetFavorMinutes();
+    static uint32_t GetFavorAchievementsNeeded();
     static const wchar_t* GetFavorMessageW();
     static const char* GetFavorMessage();
 };

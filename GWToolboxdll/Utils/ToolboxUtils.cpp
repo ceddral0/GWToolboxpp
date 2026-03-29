@@ -880,7 +880,7 @@ namespace ToolboxUtils {
             return std::format(L"\x763\x101{}\x10A{}\x1", buf, token);
         }
 
-        return L"";
+        return L"\x101";
     }
 
     bool ArrayBoolAt(const GW::Array<uint32_t>& array, const uint32_t index)
