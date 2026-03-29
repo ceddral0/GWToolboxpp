@@ -1037,7 +1037,8 @@ void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
     SubmitVertexBuffers(dx_device);
     if (should_draw_vq_overlay) 
         DrawEnemyCountLabel();
-    DrawVanquishToggleButton();
+    if (ToolboxUtils::IsExplorable())
+        DrawVanquishToggleButton();
 }
 void MissionMapWidget::Update(float)
 {
