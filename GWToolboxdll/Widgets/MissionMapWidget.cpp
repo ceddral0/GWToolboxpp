@@ -984,18 +984,21 @@ void MissionMapWidget::Update(float)
 
     const auto map_id = GW::Map::GetMapID();
 
-    const bool map_changed = map_id != border_map_id;
+    const auto instance_type = GW::Map::GetInstanceType();
+    static GW::Constants::InstanceType border_instance_type = GW::Constants::InstanceType::Loading;
+    const bool map_changed = map_id != border_map_id || instance_type != border_instance_type;
     const bool zoom_changed = mission_map_zoom != border_cached_zoom;
 
     if (map_changed || zoom_changed) {
         border_cached_zoom = mission_map_zoom;
         cached_px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : EXPLORE_CELL_SIZE / 600.0f;
-        BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
+        BuildStaticMapGeometry();
         BuildFogGeometry();
         RebuildCompassCircle();
         if (map_changed) {
             border_map_id = map_id;
-            RebuildMapBorder(); // rebuilds walkable grid + border segments
+            border_instance_type = instance_type;
+            RebuildMapBorder();
         }
     }
 
