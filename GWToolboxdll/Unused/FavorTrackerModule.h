@@ -26,6 +26,11 @@ public:
 
     // Returns remaining favor minutes, or 0 if no favor
     static uint32_t GetFavorMinutes();
+
+    // Returns an encoded string of the current favor
+    static const wchar_t* GetFavorMessageW();
+    static const char* GetFavorMessage();
+
     // Returns true if favor is currently active
     static bool HasFavor();
 };
