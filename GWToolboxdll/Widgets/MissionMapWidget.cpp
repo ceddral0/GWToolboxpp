@@ -97,15 +97,7 @@ namespace {
     GW::Constants::MapID border_map_id = static_cast<GW::Constants::MapID>(0);
     float border_cached_zoom = 0.0f; // zoom level used when static geometry was last built
 
-    // Helper function to limit some functions to only check every n frames
-    bool FrameRateCheck(clock_t& last_checked, clock_t fps) {
-        const auto now = TIMER_INIT();
-        if (now - last_checked > CLOCKS_PER_SEC / fps) {
-            last_checked = now;
-            return true;
-        }
-        return false;
-    }
+
 
 
     const D3DMATRIX IDENTITY_MATRIX = {{1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f}};
@@ -982,7 +974,7 @@ void MissionMapWidget::Update(float)
     if (!g2s.valid) return;
     // Frame rate check
     static clock_t last_check = TIMER_INIT();
-    if (!FrameRateCheck(last_check, 30)) return;
+    if (!ToolboxUtils::FrameRateCheck(last_check, 30)) return;
 
     should_draw_vq_overlay = show_vq_overlay && ToolboxUtils::IsExplorable();
 
