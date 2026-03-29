@@ -479,13 +479,22 @@ namespace {
 
         if (tracked_enemies_by_agent_id.size() < agents->size()) tracked_enemies_by_agent_id.resize(agents->size());
 
+        const auto& player_pos = player->pos;
+
         for (size_t agent_id = 0, len = agents->size(); agent_id < len; agent_id++) {
             const auto agent = agents->at(agent_id);
             auto& tracked = tracked_enemies_by_agent_id[agent_id];
             if (!agent) {
-                // Stale distance check — anything left as Stale that's too far away gets cleared
+                // Agent not in radar — only mark stale if we're close enough to
+                // their last known position that we should be able to see them
+                if (tracked.state == EnemyState::Alive) {
+                    const float dx = tracked.pos.x - player_pos.x;
+                    const float dy = tracked.pos.y - player_pos.y;
+                    if (dx * dx + dy * dy < stale_range_sq) {
+                        tracked.state = EnemyState::Stale;
+                    }
+                }
                 if (tracked.state != EnemyState::NotApplicable) {
-                    tracked.state = EnemyState::Stale;
                     highest_trackable_agent_id = agent_id;
                 }
                 continue;
@@ -507,11 +516,17 @@ namespace {
             tracked.state = EnemyState::Alive;
             highest_trackable_agent_id = agent_id;
         }
-        // Post-mark all alive entries as stale — agent loop will restore Alive if still visible
+        // Handle entries beyond current agent array size (previously tracked, now out of range)
         for (size_t agent_id = agents->size(), len = tracked_enemies_by_agent_id.size(); agent_id < len; agent_id++) {
             auto& tracked = tracked_enemies_by_agent_id[agent_id];
+            if (tracked.state == EnemyState::Alive) {
+                const float dx = tracked.pos.x - player_pos.x;
+                const float dy = tracked.pos.y - player_pos.y;
+                if (dx * dx + dy * dy < stale_range_sq) {
+                    tracked.state = EnemyState::Stale;
+                }
+            }
             if (tracked.state != EnemyState::NotApplicable) {
-                tracked.state = EnemyState::Stale;
                 highest_trackable_agent_id = agent_id;
             }
         }
