@@ -163,6 +163,7 @@ namespace GW {
     }
     namespace UI {
         struct Frame;
+        void AsyncDecodeStrS(const wchar_t* enc_str, std::string* out, GW::Constants::Language language_id = (GW::Constants::Language)0xff);
         void AsyncDecodeStr(const wchar_t* enc_str, std::wstring* out, GW::Constants::Language language_id = (GW::Constants::Language)0xff);
         bool BelongsToFrame(GW::UI::Frame* parent, GW::UI::Frame* child);
 
@@ -201,6 +202,12 @@ namespace GW {
 }
 
 namespace ToolboxUtils {
+
+    // Helper function to limit some functions to only check every n frames
+    bool FrameRateCheck(clock_t& last_checked, clock_t target_fps);
+
+    // e.g passing 200 would return the encoded string for "3 minutes"
+    std::wstring TimeToEncString(clock_t time_in_seconds);
 
     bool ArrayBoolAt(const GW::Array<uint32_t>&, uint32_t);
     // Map

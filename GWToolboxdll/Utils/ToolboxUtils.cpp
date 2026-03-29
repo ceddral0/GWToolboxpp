@@ -518,9 +518,18 @@ namespace GW {
     } // namespace MemoryMgr
 
     namespace UI {
+        void AsyncDecodeStrS(const wchar_t* enc_str, std::string* out, GW::Constants::Language language_id)
+        {
+            AsyncDecodeStr(
+                enc_str,
+                [](void* param, const wchar_t* s) {
+                    *(std::string*)param = TextUtils::WStringToString(s);
+                },
+                out, language_id
+            );
+        }
         void AsyncDecodeStr(const wchar_t* enc_str, std::wstring* out, GW::Constants::Language language_id)
         {
-            out->clear();
             AsyncDecodeStr(
                 enc_str,
                 [](void* param, const wchar_t* s) {
@@ -849,6 +858,31 @@ namespace GW {
 } // namespace GW
 
 namespace ToolboxUtils {
+    bool FrameRateCheck(clock_t& last_checked, clock_t fps)
+    {
+        const auto now = TIMER_INIT();
+        if (now - last_checked > CLOCKS_PER_SEC / fps) {
+            last_checked = now;
+            return true;
+        }
+        return false;
+    }
+    std::wstring TimeToEncString(clock_t time)
+    {
+        static constexpr std::pair<clock_t, wchar_t> units[] = {
+            {60 * 60 * 24 * 7, 0x768}, {60 * 60 * 24, 0x767}, {3 * 60 * 60, 0x766}, {60, 0x765}, {1, 0x764},
+        };
+
+        for (const auto& [divisor, token] : units) {
+            if (time < divisor) continue;
+            wchar_t buf[4];
+            ASSERT(GW::UI::UInt32ToEncStr(time / divisor, buf, _countof(buf)));
+            return std::format(L"\x763\x101{}\x10A{}\x1", buf, token);
+        }
+
+        return L"";
+    }
+
     bool ArrayBoolAt(const GW::Array<uint32_t>& array, const uint32_t index)
     {
         const uint32_t real_index = index / 32;
