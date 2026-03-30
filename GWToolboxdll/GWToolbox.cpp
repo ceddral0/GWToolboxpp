@@ -1031,6 +1031,7 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
     io.AddKeyEvent(ImGuiMod_Alt, (GetKeyState(VK_MENU) & 0x8000) != 0);
 
     if (GW::UI::GetIsUIDrawn()) {
+        ToolboxUIElement::UpdateCachedFrameStates();
         std::lock_guard lock(module_management_mutex);
         // NB: Don't use an iterator here, because it could be invalidated during draw
         for (size_t i = 0; i < ui_elements_enabled.size(); i++) {

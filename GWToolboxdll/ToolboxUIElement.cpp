@@ -26,25 +26,12 @@ namespace {
 
     struct CachedFrameState {
         bool requested = false;
-        GW::Vec2f position = {};
+        ImVec2 position = {};
     };
     clock_t last_frame_check = TIMER_INIT();
     CachedFrameState frames_by_label[_countof(available_frame_labels)];
 
-    void UpdateCachedFrameStates()
-    {
-        if (!ToolboxUtils::FrameRateCheck(last_frame_check, 30)) return;
-        const GW::UI::Frame* root = nullptr;
-        for (size_t i = 0; i < _countof(available_frame_labels); i++) {
-            auto& state = frames_by_label[i];
-            if (!state.requested) continue;
-            state.requested = false;
-            const auto frame = GW::UI::GetFrameByLabel(available_frame_labels[i].label_ws);
-            if (!frame) continue;
-            if (!root) root = GW::UI::GetFrameByLabel(L"Game");
-            state.position = frame->position.GetTopLeftOnScreen(root);
-        }
-    }
+
 
     CachedFrameState* GetCachedFrameState(const char* label)
     {
@@ -57,26 +44,40 @@ namespace {
         return nullptr;
     }
 
-    bool ImVec2Eq(const ImVec2& a, const ImVec2& b)
-    {
+    bool ImVec2Eq(const ImVec2& a, const ImVec2& b) {
         return a.x == b.x && a.y == b.y;
     }
 }
 
-
+void ToolboxUIElement::UpdateCachedFrameStates()
+{
+    if (!ToolboxUtils::FrameRateCheck(last_frame_check, 30)) return;
+    const GW::UI::Frame* root = nullptr;
+    for (size_t i = 0; i < _countof(available_frame_labels); i++) {
+        auto& state = frames_by_label[i];
+        if (!state.requested) continue;
+        state.requested = false;
+        const auto frame = GW::UI::GetFrameByLabel(available_frame_labels[i].label_ws);
+        if (!frame) continue;
+        if (!root) root = GW::UI::GetFrameByLabel(L"Game");
+        const auto pos = frame->position.GetTopLeftOnScreen(root);
+        state.position = {std::round(pos.x), std::round(pos.y)};
+    }
+}
 void ToolboxUIElement::UpdateLocationAgainstSnappedFrame()
 {
     if (snapped_frame_label.empty()) return;
-    UpdateCachedFrameStates();
     const auto snapped_frame_state = GetCachedFrameState(snapped_frame_label.c_str());
-    const auto window = ImGui::FindWindowByName(Name());
-    if (!window) return;
+    if (!snapped_frame_state) return;
     const auto& frame_pos = snapped_frame_state->position;
-    if (!ImVec2Eq(last_frame_pos, empty_gwvec2f) && !ImVec2Eq(last_frame_pos, frame_pos)) {
-        // Window deviates from where we put it — moved externally, update offset
-        const auto diff_x = std::floor(last_frame_pos.x - frame_pos.x);
-        const auto diff_y = std::floor(last_frame_pos.y - frame_pos.y);
-        ImGui::SetWindowPos(window, {window->Pos.x - diff_x, window->Pos.y - diff_y});
+    if (!ImVec2Eq(last_frame_pos, empty_imvec2) && !ImVec2Eq(last_frame_pos,frame_pos)) {
+        const auto window = ImGui::FindWindowByName(Name());
+        if (window) {
+            // Window deviates from where we put it — moved externally, update offset
+            const auto diff_x = last_frame_pos.x - frame_pos.x;
+            const auto diff_y = last_frame_pos.y - frame_pos.y;
+            ImGui::SetWindowPos(window, {window->Pos.x - diff_x, window->Pos.y - diff_y});
+        }
     }
     last_frame_pos = frame_pos;
 }

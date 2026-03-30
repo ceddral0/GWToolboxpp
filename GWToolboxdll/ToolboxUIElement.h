@@ -12,6 +12,7 @@ public:
     virtual void Draw(IDirect3DDevice9*) { }
 
     void UpdateLocationAgainstSnappedFrame();
+    static void UpdateCachedFrameStates();
 
     [[nodiscard]] virtual const char* UIName() const;
     //virtual const char* SettingsName() const override { return UIName(); }
@@ -66,5 +67,5 @@ protected:
 
     virtual void ShowVisibleRadio();
 
-    GW::Vec2f last_frame_pos;
+    ImVec2 last_frame_pos;
 };
