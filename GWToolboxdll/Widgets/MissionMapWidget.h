@@ -30,4 +30,6 @@ public:
     void DrawSettingsInternal() override;
     void Terminate() override;
     bool WndProc(UINT Message, WPARAM, LPARAM lParam) override;
+
+    static void GetTrackedEnemyCounts(int& alive, int& stale);
 };
