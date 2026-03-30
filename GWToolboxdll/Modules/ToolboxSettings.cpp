@@ -218,8 +218,8 @@ namespace {
         DropTrackerWindow::Instance(),
         GWMarketWindow::Instance(),
         InventorySorting::Instance(),
-        FavorTracker::Instance(),
-        {AccountInventoryWindow::Instance(), false}
+        FavorTracker::Instance()/*,
+        {AccountInventoryWindow::Instance(), false}*/
     };
 
     bool modules_sorted = false;
