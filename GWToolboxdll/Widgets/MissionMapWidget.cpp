@@ -69,7 +69,7 @@ namespace {
     // Used to easily terminate hanging buffers later
     D3DVertexBuffer* vertex_buffers[] = {&unexplored_area, &frontier_border, &minimap_lines, &inaccessible_area_and_borders, &enemy_vertex_buffer, &compass_circle};
 
-    constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
+    constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent / 2.f;
     constexpr size_t MAX_MAP_WIDTH = 50000;
     constexpr size_t MAX_CELLS_PER_AXIS = (size_t)(MAX_MAP_WIDTH / EXPLORE_CELL_SIZE);
 
