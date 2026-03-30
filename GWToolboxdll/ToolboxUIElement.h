@@ -11,6 +11,8 @@ public:
     // Draw user interface. Will be called every frame if the element is visible
     virtual void Draw(IDirect3DDevice9*) { }
 
+    void UpdateLocationAgainstSnappedFrame();
+
     [[nodiscard]] virtual const char* UIName() const;
     //virtual const char* SettingsName() const override { return UIName(); }
 
@@ -57,8 +59,12 @@ protected:
     bool is_resizable = true;
     bool is_movable = true;
 
+    std::string snapped_frame_label;
+
     float min_size[2] = { 250.f,90.f };
     float max_size[2] = { FLT_MAX, FLT_MAX };
 
     virtual void ShowVisibleRadio();
+
+    GW::Vec2f last_frame_pos;
 };

@@ -1038,6 +1038,7 @@ void GWToolbox::Draw(IDirect3DDevice9* device)
             if (world_map_showing && !uielement->ShowOnWorldMap()) {
                 continue;
             }
+            uielement->UpdateLocationAgainstSnappedFrame();
             uielement->Draw(device);
         }
 

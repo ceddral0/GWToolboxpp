@@ -958,7 +958,7 @@ void MissionMapWidget::SaveSettings(ToolboxIni* ini)
 
 void MissionMapWidget::Draw(IDirect3DDevice9* dx_device)
 {
-    if (!visible || !GW::Map::GetIsMapLoaded()) return;
+    if (!visible || !GW::Map::GetIsMapLoaded() || !mission_map_frame || !mission_map_frame->IsVisible()) return;
 
     SubmitVertexBuffers(dx_device);
     if (should_draw_vq_overlay) 
