@@ -7,7 +7,7 @@
 #include <memory>
 #include <Timer.h>
 
-class AccountInventoryWindow : public ToolboxWindow {
+/*class AccountInventoryWindow : public ToolboxWindow {
     enum ItemColumnID
     {
         ItemColumnID_Character,
@@ -108,7 +108,7 @@ class AccountInventoryWindow : public ToolboxWindow {
             return delta * sort_direction < 0;
         }
         // used for order inside MergeStack, i.e. for interaction and tooltip
-        bool operator()(const std::shared_ptr<InventoryItem> l, const std::shared_ptr<InventoryItem> r) const
+        bool operator()(InventoryItem *l, InventoryItem *r) const
         {
             if (l->account != r->account) {
                 // lowest item is the one that can be interacted with. Make sure it is one on this account if there is one
@@ -126,7 +126,7 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct ItemHash {
-        std::size_t operator()(const std::shared_ptr<InventoryItem> i) const noexcept
+        std::size_t operator()(InventoryItem *i) const noexcept
         {
             std::size_t h1 = std::hash<std::wstring>{}(i->account);
             std::size_t h2 = std::hash<std::wstring>{}(i->character);
@@ -138,7 +138,7 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct ItemEqual {
-        bool operator()(const std::shared_ptr<InventoryItem> l, const std::shared_ptr<InventoryItem> r) const
+        bool operator()(InventoryItem *l, InventoryItem *r) const
         {
             return l->hero_id == r->hero_id && l->bag_id == r->bag_id && l->slot == r->slot && l->account == r->account && l->character == r->character;
         }
@@ -147,14 +147,9 @@ class AccountInventoryWindow : public ToolboxWindow {
     struct MergeStack {
         uint16_t quantity;
         std::wstring description;
-        std::set<std::shared_ptr<InventoryItem>, ItemCompare> i;
+        std::set<InventoryItem *, ItemCompare> i;
 
         MergeStack(std::wstring account): quantity{}, description{}, i(ItemCompare{nullptr, account}) {}
-    };
-
-    struct QueueDescription {
-        const std::shared_ptr<InventoryItem> i{};
-        std::wstring description{};
     };
 
     struct CharacterFreeSlots {
@@ -241,15 +236,15 @@ class AccountInventoryWindow : public ToolboxWindow {
         show_menubutton = can_show_in_main_window;
     }
 
-    void OnInventoryItemClicked(std::shared_ptr<InventoryItem> i, bool move);
+    void OnInventoryItemClicked(InventoryItem *i, bool move);
     static bool CheckIniDirty(std::shared_ptr<InventoryIni> ini);
     std::shared_ptr<InventoryIni> GetIni(std::wstring ini_ID, std::wstring account);
-    std::string ItemToSectionName(std::shared_ptr<InventoryItem> i) const;
+    std::string ItemToSectionName(InventoryItem *i) const;
     void LoadFromFiles(bool only_foreign);
     void SaveToFiles(bool include_foreign);
     void SortInventory(ImGuiTableSortSpecs* sort_specs);
     void SortSlots(ImGuiTableSortSpecs* sort_specs);
-    void QueueDescriptionDecode(std::shared_ptr<InventoryItem> i);
+    void DescriptionDecode(InventoryItem *i);
     void ClearMissingItem(std::wstring account, std::wstring character, uint32_t hero_id, uint32_t bag_id, uint32_t slot);
     // state machine for rerolling to items, internal functions
     void StepReroll();
@@ -260,11 +255,11 @@ class AccountInventoryWindow : public ToolboxWindow {
     // collective callback hook
     GW::HookEntry OnUIMessage_HookEntry{};
     // main item storage
-    std::unordered_set<std::shared_ptr<InventoryItem>, ItemHash, ItemEqual> inventory{};
+    std::unordered_set<InventoryItem *, ItemHash, ItemEqual> inventory{};
     // On*SlotCleared send an item_id, but the information which bag and slot it was in
     // is already removed. In order to remove items from inventory without iterating,
     // we keep track of the item_id->InventoryItem mapping
-    std::unordered_map<uint32_t, std::shared_ptr<InventoryItem>> inventory_lookup{};
+    std::unordered_map<uint32_t, InventoryItem *> inventory_lookup{};
     // sorted/filtered view for display
     std::vector<std::shared_ptr<MergeStack>> inventory_sorted{};
     // ini files, 1 per character/chest
@@ -290,8 +285,6 @@ class AccountInventoryWindow : public ToolboxWindow {
     size_t filtered_item_count = 0;
     std::wstring last_character{};
     std::set<std::wstring> last_available_chars{};
-    std::mutex description_decode_lock{};
-    std::queue<std::shared_ptr<QueueDescription>> description_decode_queue;
     RerollStage reroll_stage = RerollStage::None;
     std::vector<GW::AvailableCharacterInfo> reroll_char_queue{};
     std::vector<uint32_t> reroll_hero_queue{};
@@ -300,7 +293,7 @@ class AccountInventoryWindow : public ToolboxWindow {
     clock_t save_hero_timer{};
     clock_t map_loaded_delayed_timer{};
     bool map_loaded_delayed_trigger = false;
-    std::shared_ptr<InventoryItem> item_to_move{};
+    InventoryItem *item_to_move = nullptr;
 
     // config options
     bool detailed_view = false;
@@ -355,5 +348,5 @@ public:
     GW::Bag * OnPartyRemoveHero(uint32_t hero_id);
 
     void AddItem(uint32_t item_id);
-    void RemoveItem(uint32_t item_id);
-};
+    bool RemoveItem(uint32_t item_id);
+};*/

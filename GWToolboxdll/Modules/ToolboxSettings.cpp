@@ -213,8 +213,8 @@ namespace {
         DupingWindow::Instance(),
         ArmoryWindow::Instance(),
         EnemyWindow::Instance(),
-        TargetInfoWindow::Instance(),
-        {AccountInventoryWindow::Instance(), false}
+        TargetInfoWindow::Instance()/*,
+        {AccountInventoryWindow::Instance(), false}*/
     };
 
     bool modules_sorted = false;
