@@ -624,6 +624,18 @@ void AgentRenderer::OnUIMessage(GW::HookStatus*, const GW::UI::UIMessage msgid, 
                     if (ca->mapId > 0 && ca->mapId != static_cast<DWORD>(GW::Map::GetMapID())) {
                         continue;
                     }
+                    if (ca->combat_state == CombatState::InCombat && !living->GetInCombatStance()) {
+                        continue;
+                    }
+                    if (ca->combat_state == CombatState::NotInCombat && living->GetInCombatStance()) {
+                        continue;
+                    }
+                    if (ca->weapon_state == WeaponState::HasWeapon && (living->weapon_type == 0 || living->weapon_type == 512)) {
+                        continue;
+                    }
+                    if (ca->weapon_state == WeaponState::NoWeapon && !(living->weapon_type == 0 || living->weapon_type == 512)) {
+                        continue;
+                    }
                     msg->text_color = ca->color_text;
                 }
             }
@@ -674,6 +686,21 @@ std::vector<const AgentRenderer::CustomAgent*>* AgentRenderer::GetCustomAgentsTo
         }
         if (ca->mapId > 0 && ca->mapId != static_cast<DWORD>(GW::Map::GetMapID())) {
             continue;
+        }
+        if (agent->GetIsLivingType()) {
+            const auto living = agent->GetAsAgentLiving();
+            if (ca->combat_state == CombatState::InCombat && !living->GetInCombatStance()) {
+                continue;
+            }
+            if (ca->combat_state == CombatState::NotInCombat && living->GetInCombatStance()) {
+                continue;
+            }
+            if (ca->weapon_state == WeaponState::HasWeapon && (living->weapon_type == 0 || living->weapon_type == 512)) {
+                continue;
+            }
+            if (ca->weapon_state == WeaponState::NoWeapon && !(living->weapon_type == 0 || living->weapon_type == 512)) {
+                continue;
+            }
         }
         out.push_back(ca);
     }
@@ -1312,6 +1339,8 @@ AgentRenderer::CustomAgent::CustomAgent(const ToolboxIni* ini, const char* secti
     std::snprintf(name, sizeof(name), "%s", ini->GetValue(section, VAR_NAME(name), ""));
     modelId = static_cast<DWORD>(ini->GetLongValue(section, VAR_NAME(modelId), static_cast<long>(modelId)));
     mapId = static_cast<DWORD>(ini->GetLongValue(section, VAR_NAME(mapId), static_cast<long>(mapId)));
+    combat_state = static_cast<CombatState>(ini->GetLongValue(section, VAR_NAME(combat_state), static_cast<long>(combat_state)));
+    weapon_state = static_cast<WeaponState>(ini->GetLongValue(section, VAR_NAME(weapon_state), static_cast<long>(weapon_state)));
 
     color = Colors::Load(ini, section, VAR_NAME(color), color);
     color_text = Colors::Load(ini, section, VAR_NAME(color_text), color_text);
@@ -1344,6 +1373,8 @@ void AgentRenderer::CustomAgent::SaveSettings(ToolboxIni* ini, const char* secti
     ini->SetValue(section, VAR_NAME(name), name);
     ini->SetLongValue(section, VAR_NAME(modelId), static_cast<long>(modelId));
     ini->SetLongValue(section, VAR_NAME(mapId), static_cast<long>(mapId));
+    ini->SetLongValue(section, VAR_NAME(combat_state), static_cast<long>(combat_state));
+    ini->SetLongValue(section, VAR_NAME(weapon_state), static_cast<long>(weapon_state));
 
     Colors::Save(ini, section, VAR_NAME(color), color);
     Colors::Save(ini, section, VAR_NAME(color_text), color_text);
@@ -1419,6 +1450,18 @@ bool AgentRenderer::CustomAgent::DrawSettings(Operation& op)
             changed = true;
         }
         ImGui::ShowHelp("The map where it will be applied. Optional. Leave 0 for any map");
+        ImGui::SetCursorPosX(x);
+        static const char* combat_state_items[] = {"In combat", "Not in combat", "Either"};
+        if (ImGui::Combo("Combat", (int*)&combat_state, combat_state_items, 3)) {
+            changed = true;
+        }
+        ImGui::ShowHelp("Require the agent to be in a particular combat stance");
+        ImGui::SetCursorPosX(x);
+        static const char* weapon_state_items[] = {"Has weapon", "No weapon", "Either"};
+        if (ImGui::Combo("Weapon", (int*)&weapon_state, weapon_state_items, 3)) {
+            changed = true;
+        }
+        ImGui::ShowHelp("Require the agent to have a weapon");
 
         ImGui::Spacing();
 
