@@ -1088,3 +1088,14 @@ void MissionMapWidget::Terminate()
         buffer->Terminate();
     }
 }
+
+void MissionMapWidget::GetTrackedEnemyCounts(int& alive, int& stale)
+{
+    alive = 0;
+    stale = 0;
+    for (size_t i = 0, len = highest_trackable_agent_id; i <= len && i < tracked_enemies_by_agent_id.size(); i++) {
+        const auto& enemy = tracked_enemies_by_agent_id[i];
+        if (enemy.state == EnemyState::Alive) alive++;
+        else if (enemy.state == EnemyState::Stale) stale++;
+    }
+}
