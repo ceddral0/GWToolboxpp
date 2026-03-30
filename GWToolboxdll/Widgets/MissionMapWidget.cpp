@@ -69,7 +69,7 @@ namespace {
     // Used to easily terminate hanging buffers later
     D3DVertexBuffer* vertex_buffers[] = {&unexplored_area, &frontier_border, &minimap_lines, &inaccessible_area_and_borders, &enemy_vertex_buffer, &compass_circle};
 
-    constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent;
+    constexpr float EXPLORE_CELL_SIZE = GW::Constants::Range::Adjacent / 2.f;
     constexpr size_t MAX_MAP_WIDTH = 50000;
     constexpr size_t MAX_CELLS_PER_AXIS = (size_t)(MAX_MAP_WIDTH / EXPLORE_CELL_SIZE);
 
@@ -111,6 +111,7 @@ namespace {
         bool valid = false;
         clock_t last_rebuild = TIMER_INIT();
 
+        float cached_basis_zoom = 0.f;
         void Rebuild(); // defined after namespace variables
 
         void Project(float gx, float gy, float& sx, float& sy) const
@@ -564,38 +565,42 @@ namespace {
     {
         valid = false;
 
+        const auto* mm_ctx = GW::Map::GetMissionMapContext();
+        if (!mm_ctx || !mm_ctx->h003c) return;
+
         const auto player_pos = GW::PlayerMgr::GetPlayerPosition();
         if (!player_pos) return;
-        auto px = player_pos->x;
-        auto py = player_pos->y;
+        const float px = player_pos->x;
+        const float py = player_pos->y;
 
-        // Derive basis vectors by sampling two nearby points.
-        // GamePosToMissionMapScreenPos goes through world map coords, and the
-        // differences cancel out any constant offset errors (e.g. underground
-        // maps where pan_offset is not in world map coordinates).
-        constexpr float STEP = 1000.f;
-        GW::Vec2f s00, s10, s01;
-        if (!GamePosToMissionMapScreenPos({px, py, 0}, s00) ||
-            !GamePosToMissionMapScreenPos({px + STEP, py, 0}, s10) ||
-            !GamePosToMissionMapScreenPos({px, py + STEP, 0}, s01)) return;
+        // Only recompute basis vectors when zoom changes — they're stable
+        // across panning. Recomputing every frame causes floating-point jitter.
+        if (mission_map_zoom != cached_basis_zoom || !valid) {
+            cached_basis_zoom = mission_map_zoom;
 
-        ax = (s10.x - s00.x) / STEP;
-        ay = (s10.y - s00.y) / STEP;
-        bx = (s01.x - s00.x) / STEP;
-        by = (s01.y - s00.y) / STEP;
+            constexpr float STEP = 1000.f;
+            GW::Vec2f s00, s10, s01;
+            if (!GamePosToMissionMapScreenPos({px, py, 0}, s00) ||
+                !GamePosToMissionMapScreenPos({px + STEP, py, 0}, s10) ||
+                !GamePosToMissionMapScreenPos({px, py + STEP, 0}, s01)) return;
+
+            ax = (s10.x - s00.x) / STEP;
+            ay = (s10.y - s00.y) / STEP;
+            bx = (s01.x - s00.x) / STEP;
+            by = (s01.y - s00.y) / STEP;
+        }
 
         // Compute origin from the player's known mission map position,
         // not from the world-map-based s00 which is wrong for underground maps.
-        const auto* mm_ctx = GW::Map::GetMissionMapContext();
-        if (!mm_ctx || !mm_ctx->h003c) return;
         const GW::Vec2f mm_pos = mm_ctx->h003c->player_mission_map_pos;
         const GW::Vec2f mm_offset = mm_pos - current_pan_offset;
         const GW::Vec2f mm_scaled = {mm_offset.x * mission_map_scale.x, mm_offset.y * mission_map_scale.y};
         const GW::Vec2f player_screen = {mm_scaled.x * mission_map_zoom + mission_map_screen_pos.x,
                                          mm_scaled.y * mission_map_zoom + mission_map_screen_pos.y};
 
-        ox = player_screen.x - px * ax - py * bx;
-        oy = player_screen.y - px * ay - py * by;
+        // Snap origin to nearest pixel to reduce sub-pixel flicker on thin lines
+        ox = roundf(player_screen.x - px * ax - py * bx);
+        oy = roundf(player_screen.y - px * ay - py * by);
         valid = true;
     }
 
@@ -719,7 +724,7 @@ namespace {
         if (!show_vq_overlay) return;
 
         int alive_count = 0, stale_count = 0;
-        for (size_t i = 0, len = highest_trackable_agent_id; i < len;i++) {
+        for (size_t i = 0, len = highest_trackable_agent_id; i <= len; i++) {
             const auto& enemy = tracked_enemies_by_agent_id[i];
             if (enemy.state == EnemyState::Alive)
                 alive_count++;
@@ -805,8 +810,8 @@ namespace {
             if (!compass_circle.empty()) {
                 if (const auto* player = GW::Agents::GetControlledCharacter()) {
                     D3DMATRIX compassMatrix = gameToScreen;
-                    compassMatrix._41 = g2s.ox + player->pos.x * g2s.ax + player->pos.y * g2s.bx;
-                    compassMatrix._42 = g2s.oy + player->pos.x * g2s.ay + player->pos.y * g2s.by;
+                    compassMatrix._41 = roundf(g2s.ox + player->pos.x * g2s.ax + player->pos.y * g2s.bx);
+                    compassMatrix._42 = roundf(g2s.oy + player->pos.x * g2s.ay + player->pos.y * g2s.by);
                     dx_device->SetTransform(D3DTS_WORLD, &compassMatrix);
                     compass_circle.Render(dx_device);
                     dx_device->SetTransform(D3DTS_WORLD, &gameToScreen);
@@ -984,18 +989,21 @@ void MissionMapWidget::Update(float)
 
     const auto map_id = GW::Map::GetMapID();
 
-    const bool map_changed = map_id != border_map_id;
+    const auto instance_type = GW::Map::GetInstanceType();
+    static GW::Constants::InstanceType border_instance_type = GW::Constants::InstanceType::Loading;
+    const bool map_changed = map_id != border_map_id || instance_type != border_instance_type;
     const bool zoom_changed = mission_map_zoom != border_cached_zoom;
 
     if (map_changed || zoom_changed) {
         border_cached_zoom = mission_map_zoom;
         cached_px_to_game = g2s.valid ? 1.0f / sqrtf(g2s.ax * g2s.ax + g2s.ay * g2s.ay) : EXPLORE_CELL_SIZE / 600.0f;
-        BuildStaticMapGeometry(); // rebuilds static vertex cache with correct thickness
+        BuildStaticMapGeometry();
         BuildFogGeometry();
         RebuildCompassCircle();
         if (map_changed) {
             border_map_id = map_id;
-            RebuildMapBorder(); // rebuilds walkable grid + border segments
+            border_instance_type = instance_type;
+            RebuildMapBorder();
         }
     }
 
