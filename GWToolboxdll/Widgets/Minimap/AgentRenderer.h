@@ -66,6 +66,9 @@ private:
         CircleCenter // alpha -50
     };
 
+    enum CombatState { InCombat, NotInCombat, EitherCombat };
+    enum WeaponState { HasWeapon, NoWeapon, EitherWeapon };
+
     class CustomAgent {
         static unsigned int cur_ui_id;
 
@@ -94,6 +97,8 @@ private:
         char name[128]{};
         DWORD modelId = 0;
         DWORD mapId = 0; // 0 for 'any map'
+        CombatState combat_state = CombatState::EitherCombat;
+        WeaponState weapon_state = WeaponState::EitherWeapon;
 
         // attributes to change
         Color color = 0xFFF00000;
