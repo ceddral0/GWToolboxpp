@@ -1171,25 +1171,27 @@ namespace {
     } skill_to_use;
     const char* useskill_syntax = "'/useskill [skill]' starts using the skill on recharge.\n"
                                   "Use the skill number instead of [skill] (e.g. '/useskill 5').\n"
-                                  "Use empty '/useskill' or '/useskill stop' to stop all.\n"
-                                  "Use '/useskill [skill]' to stop the skill.";
+                                  "Use empty '/useskill' or '/useskill [stop|skill|0]' to stop the skill.";
     void CHAT_CMD_FUNC(CmdUseSkill)
     {
-        if (!IsMapReady() || argc < 2) {
-            Log::Warning(useskill_syntax);
+        if (!IsMapReady()) {
+            return;
+        }
+        if (argc < 2) {
+            skill_to_use.slot = 0;
             return;
         }
         const std::wstring arg1 = TextUtils::ToLower(argv[1]);
         if (arg1 == L"stop" || arg1 == L"off") {
+            skill_to_use.slot = 0;
             return;
         }
         uint32_t num = 0;
         if (!TextUtils::ParseUInt(argv[1], &num) || num > 8) {
             Log::Warning(useskill_syntax);
             return;
-        }
-        if (skill_to_use.slot == num) num = 0;
-        skill_to_use.slot = num;
+        } 
+        skill_to_use.slot = (skill_to_use.slot == num) ? 0 : num;
         skill_to_use.skill_usage_delay = .0f;
     }
 
