@@ -658,13 +658,13 @@ namespace {
     }
 
 
-    constexpr auto withdraw_syntax = "'/withdraw <quantity (1-65535)> [model_id1 model_id2 ...]' tops up your inventory "
+    constexpr auto withdraw_syntax = "'/withdraw [quantity (1-65535)] [model_id1 model_id2 ...]' tops up your inventory "
         "with a minimum quantity of 1 or more items, identified by model_id\n"
-        "If no model_ids are passed, withdraws <quantity>[k] gold from storage\n"
+        "If no model_ids are passed, withdraws [quantity][k] gold from storage\n"
         "If quantity is 'all' and you do not pass model_ids, withdraws all gold you have or can hold.";
-    constexpr auto deposit_syntax = "'/deposit <quantity (1-65535)> [model_id1 model_id2 ...]' deposits <quantity> items, "
+    constexpr auto deposit_syntax = "'/deposit [quantity (1-65535)] [model_id1 model_id2 ...]' deposits [quantity] items, "
         "identified by model ids, from your inventory to your storage.\n"
-        "If no model_ids are passed, deposits <quantity>[k] gold from your inventory\n"
+        "If no model_ids are passed, deposits [quantity][k] gold from your inventory\n"
         "If quantity is 'all' and you do not pass model_ids, deposits all gold [platinum] from your inventory to your storage.";
 
     struct CmdAlias {
@@ -1166,27 +1166,29 @@ namespace {
         clock_t skill_timer = clock();
         void Update();
     } skill_to_use;
-    const char* useskill_syntax = "'/useskill <skill>' starts using the skill on recharge.\n"
-                                  "Use the skill number instead of <skill> (e.g. '/useskill 5').\n"
-                                  "Use empty '/useskill' or '/useskill stop' to stop all.\n"
-                                  "Use '/useskill <skill>' to stop the skill.";
+    const char* useskill_syntax = "'/useskill [skill]' starts using the skill on recharge.\n"
+                                  "Use the skill number instead of [skill] (e.g. '/useskill 5').\n"
+                                  "Use empty '/useskill' or '/useskill [stop|skill|0]' to stop the skill.";
     void CHAT_CMD_FUNC(CmdUseSkill)
     {
-        if (!IsMapReady() || argc < 2) {
-            Log::Warning(useskill_syntax);
+        if (!IsMapReady()) {
+            return;
+        }
+        if (argc < 2) {
+            skill_to_use.slot = 0;
             return;
         }
         const std::wstring arg1 = TextUtils::ToLower(argv[1]);
         if (arg1 == L"stop" || arg1 == L"off") {
+            skill_to_use.slot = 0;
             return;
         }
         uint32_t num = 0;
         if (!TextUtils::ParseUInt(argv[1], &num) || num > 8) {
             Log::Warning(useskill_syntax);
             return;
-        }
-        if (skill_to_use.slot == num) num = 0;
-        skill_to_use.slot = num;
+        } 
+        skill_to_use.slot = (skill_to_use.slot == num) ? 0 : num;
         skill_to_use.skill_usage_delay = .0f;
     }
 
