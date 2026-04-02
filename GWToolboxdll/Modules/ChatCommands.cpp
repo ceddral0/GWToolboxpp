@@ -1166,16 +1166,16 @@ namespace {
         clock_t skill_timer = clock();
         void Update();
     } skill_to_use;
-    const char* useskill_syntax = "'/useskill [skill]' starts using the skill on recharge.\n"
-                                  "Use the skill number instead of [skill] (e.g. '/useskill 5').\n"
-                                  "Use empty '/useskill' or '/useskill [stop|skill|0]' to stop the skill.";
+    const char* useskill_syntax = "'/useskill [slot]' starts using the skill on recharge.\n"
+                                  "Use the skill number instead of [slot] (e.g. '/slot 5').\n"
+                                  "Use '/useskill [stop|off|[slot]|0]' to stop the skill.";
     void CHAT_CMD_FUNC(CmdUseSkill)
     {
         if (!IsMapReady()) {
             return;
         }
         if (argc < 2) {
-            skill_to_use.slot = 0;
+            Log::Warning(useskill_syntax);
             return;
         }
         const std::wstring arg1 = TextUtils::ToLower(argv[1]);
