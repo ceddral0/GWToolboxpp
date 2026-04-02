@@ -661,13 +661,13 @@ namespace {
     }
 
 
-    constexpr auto withdraw_syntax = "'/withdraw <quantity (1-65535)> [model_id1 model_id2 ...]' tops up your inventory "
+    constexpr auto withdraw_syntax = "'/withdraw [quantity (1-65535)] [model_id1 model_id2 ...]' tops up your inventory "
         "with a minimum quantity of 1 or more items, identified by model_id\n"
-        "If no model_ids are passed, withdraws <quantity>[k] gold from storage\n"
+        "If no model_ids are passed, withdraws [quantity][k] gold from storage\n"
         "If quantity is 'all' and you do not pass model_ids, withdraws all gold you have or can hold.";
-    constexpr auto deposit_syntax = "'/deposit <quantity (1-65535)> [model_id1 model_id2 ...]' deposits <quantity> items, "
+    constexpr auto deposit_syntax = "'/deposit [quantity (1-65535)] [model_id1 model_id2 ...]' deposits [quantity] items, "
         "identified by model ids, from your inventory to your storage.\n"
-        "If no model_ids are passed, deposits <quantity>[k] gold from your inventory\n"
+        "If no model_ids are passed, deposits [quantity][k] gold from your inventory\n"
         "If quantity is 'all' and you do not pass model_ids, deposits all gold [platinum] from your inventory to your storage.";
 
     struct CmdAlias {
@@ -1169,10 +1169,10 @@ namespace {
         clock_t skill_timer = clock();
         void Update();
     } skill_to_use;
-    const char* useskill_syntax = "'/useskill <skill>' starts using the skill on recharge.\n"
-                                  "Use the skill number instead of <skill> (e.g. '/useskill 5').\n"
+    const char* useskill_syntax = "'/useskill [skill]' starts using the skill on recharge.\n"
+                                  "Use the skill number instead of [skill] (e.g. '/useskill 5').\n"
                                   "Use empty '/useskill' or '/useskill stop' to stop all.\n"
-                                  "Use '/useskill <skill>' to stop the skill.";
+                                  "Use '/useskill [skill]' to stop the skill.";
     void CHAT_CMD_FUNC(CmdUseSkill)
     {
         if (!IsMapReady() || argc < 2) {
