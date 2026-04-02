@@ -194,9 +194,9 @@ namespace GW {
 
         const MaterialInfo* GetMaterialInfo(GW::Constants::MaterialSlot slot);
 
-        uint32_t GetUses(GW::Item* item);
-        uint32_t GetAlcoholPointsPerUse(GW::Item* item);
-        bool IsAlcohol(GW::Item* item);
+        uint32_t GetUses(const GW::Item* item);
+        uint32_t GetAlcoholPointsPerUse(const GW::Item* item);
+        bool IsAlcohol(const GW::Item* item);
     }
 }
 

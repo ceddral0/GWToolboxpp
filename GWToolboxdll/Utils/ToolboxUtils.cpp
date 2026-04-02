@@ -743,7 +743,7 @@ namespace GW {
             return found == material_info.end() ? nullptr : &found->second;
         }
 
-        uint32_t GetUses(GW::Item* item)
+        uint32_t GetUses(const GW::Item* item)
         {
             if (!item) return 0;
             const GW::ItemModifier* mod = item->mod_struct;
@@ -756,7 +756,7 @@ namespace GW {
             return item->quantity;
         }
 
-        uint32_t GetAlcoholPointsPerUse(GW::Item* item)
+        uint32_t GetAlcoholPointsPerUse(const GW::Item* item)
         {
             if (!item) return 0;
             switch (item->model_id) {
@@ -781,7 +781,7 @@ namespace GW {
             return 0;
         }
 
-        bool IsAlcohol(GW::Item* item)
+        bool IsAlcohol(const GW::Item* item)
         {
             return GetAlcoholPointsPerUse(item) > 0;
         }
