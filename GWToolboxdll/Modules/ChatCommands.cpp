@@ -1167,8 +1167,8 @@ namespace {
         void Update();
     } skill_to_use;
     const char* useskill_syntax = "'/useskill [slot]' starts using the skill on recharge.\n"
-                                  "Use the skill number instead of [slot] (e.g. '/slot 5').\n"
-                                  "Use '/useskill [stop|off|[slot]|0]' to stop the skill.";
+                                  "Use the skill number instead of [slot] (e.g. '/useskill 5').\n"
+                                  "Use '/useskill [stop|off|slot|0]' to stop the skill.";
     void CHAT_CMD_FUNC(CmdUseSkill)
     {
         if (!IsMapReady()) {
