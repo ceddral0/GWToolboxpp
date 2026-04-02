@@ -575,13 +575,6 @@ namespace GW {
         }
     } // namespace PlayerMgr
     namespace Agents {
-        bool GetIsAgentTargettable(const GW::Agent* agent)
-        {
-            if (!(agent && agent->GetIsLivingType() && agent->GetAsAgentLiving()->IsNPC())) 
-                return GetAgentEncName(agent);
-            const auto npc = GW::Agents::GetNPCByID(((GW::AgentLiving*)agent)->player_number);
-            return (npc && (npc->npc_flags & 0x10000) == 0);
-        }
         bool IsAgentCarryingBundle(uint32_t agent_id)
         {
             const auto agent = (GW::AgentLiving*)GW::Agents::GetAgentByID(agent_id);

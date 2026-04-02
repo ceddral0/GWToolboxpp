@@ -175,7 +175,6 @@ namespace GW {
         GW::GamePos* GetPlayerPosition();
     }
     namespace Agents {
-        bool GetIsAgentTargettable(const GW::Agent* agent);
         bool IsAgentCarryingBundle(uint32_t agent_id);
         void AsyncGetAgentName(const uint32_t agent_id, std::wstring& out);
         void AsyncGetAgentName(const Agent* agent, std::wstring& out);

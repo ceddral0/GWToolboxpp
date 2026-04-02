@@ -10,6 +10,10 @@
 #include <ToolboxUIElement.h>
 #include <Modules/PluginModule.h>
 
+namespace GW {
+    enum AgentTargetFlags : uint32_t;
+}
+
 class ChatCommands : public ToolboxModule {
 
 public:
@@ -31,16 +35,6 @@ public:
         DWORD npc_model_file_id = 0;
         DWORD npc_model_file_data = 0;
         DWORD flags = 0;
-    };
-
-    enum TargetType : uint32_t {
-        Gadget = 1,
-        Player = 2,
-        Npc = 4,
-        Item = 8,
-        Living = 16,
-        Enemy = 32,
-        Ally = 64
     };
 
     [[nodiscard]] const char* Name() const override { return "Chat Commands"; }
@@ -108,7 +102,7 @@ private:
     static bool GetNPCInfoByName(const std::wstring& name, PendingTransmo& transmo);
     static bool ParseScale(int scale, PendingTransmo& transmo);
     static bool GetTargetTransmoInfo(PendingTransmo& transmo);
-    static void TargetNearest(const wchar_t* model_id_or_name, uint32_t type);
+    static void TargetNearest(const wchar_t* model_id_or_name, GW::AgentTargetFlags type);
 
     static std::vector<ToolboxUIElement*> CHAT_CMD_FUNC(MatchingWindows);
     static GW::UI::WindowID CHAT_CMD_FUNC(MatchingGWWindow);
@@ -119,7 +113,7 @@ private:
         clock_t started = 0;
         std::vector<std::pair<uint32_t, GuiUtils::EncString*>> npc_names;
         std::wstring search;
-        void Init(const wchar_t* _search, const uint32_t type = 0xffffffff);
+        void Init(const wchar_t* _search, const GW::AgentTargetFlags type);
         void Update();
         void Terminate() { Reset(); }
         void Reset()

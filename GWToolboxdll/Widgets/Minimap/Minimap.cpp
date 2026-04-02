@@ -1667,7 +1667,7 @@ void Minimap::SelectTarget(const GW::Vec2f pos)
         if (agent->GetIsGadgetType() && !agent_is_locked_chest) {
             continue; // allow locked chests
         }
-        if (!GW::Agents::GetIsAgentTargettable(agent) && !agent_is_locked_chest) {
+        if (!GW::Agents::GetAgentMatchesFlags(agent) && !agent_is_locked_chest) {
             continue; // block all useless minis
         }
         const float new_distance = GetSquareDistance(pos, agent->pos);

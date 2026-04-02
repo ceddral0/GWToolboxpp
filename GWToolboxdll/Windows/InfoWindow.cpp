@@ -1076,6 +1076,7 @@ namespace {
 
         // For debugging changes to flags/arrays etc
         [[maybe_unused]] const GW::GameContext* g = GW::GetGameContext();
+        if (!g) return;
         [[maybe_unused]] const GW::GuildContext* gu = g->guild;
         [[maybe_unused]] const GW::CharContext* c = g->character;
         [[maybe_unused]] const GW::WorldContext* w = g->world;

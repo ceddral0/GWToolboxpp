@@ -854,7 +854,7 @@ void AgentRenderer::Render(IDirect3DDevice9* device)
             }
             else if (agent->GetIsLivingType()) {
                 const auto living = agent->GetAsAgentLiving();
-                if (!show_hidden_npcs && !GW::Agents::GetIsAgentTargettable(living)) {
+                if (!show_hidden_npcs && !GW::Agents::GetAgentMatchesFlags(living)) {
                     continue;
                 }
                 if (add_marked_target(living)) {

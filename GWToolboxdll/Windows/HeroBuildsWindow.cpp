@@ -75,15 +75,15 @@ namespace {
         HeroID::Merc5,
         HeroID::Merc6,
         HeroID::Merc7,
-        HeroID::Merc8
+        HeroID::Merc8,
+        HeroID::Devona,
+        HeroID::GhostofAlthea
     };
 
-    const bool GetHeroEncName(GW::Constants::HeroID hero_id,GuiUtils::EncString* out) {
+    GuiUtils::EncString* GetHeroEncName(GW::Constants::HeroID hero_id) {
         const auto c = GW::PartyMgr::GetHeroConstData(hero_id);
-        return c && c->name_id ? out->reset(c->name_id), true : false;
+        return Resources::DecodeStringId(c ? c->name_id : 1);
     }
-
-    GuiUtils::EncString hero_names[GW::Constants::HeroID::Count];
 
     const size_t GetPlayerHeroCount()
     {
@@ -312,11 +312,7 @@ void HeroBuildsWindow::Draw(IDirect3DDevice9*)
                             if (idx >= static_cast<int>(HeroIndexToID.size())) {
                                 return false;
                             }
-                            const auto id = HeroIndexToID.at(idx);
-                            if (!GetHeroEncName(id, &hero_names[id])) {
-                                return false;
-                            }
-                            *out_text = hero_names[id].string().c_str();
+                            *out_text = GetHeroEncName(HeroIndexToID.at(idx))->string().c_str();
                             return true;
                         },
                         nullptr, HeroIndexToID.size())) {
@@ -526,8 +522,7 @@ void HeroBuildsWindow::HeroBuildName(const TeamHeroBuild& tbuild, const size_t i
     if (name.empty() && code.empty() && id == HeroID::NoHero) {
         return; // nothing to do here
     }
-    GetHeroEncName(id, &hero_names[id]);
-    const char* c = hero_names[id].string().c_str();
+    const char* c = GetHeroEncName(id)->string().c_str();
 
     if (name.empty()) {
         if (idx > 0) {
