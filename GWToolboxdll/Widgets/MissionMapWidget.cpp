@@ -434,9 +434,18 @@ namespace {
             tracked_enemies_instance_type = instance_type;
         }
 
+        const auto* player = GW::Agents::GetControlledCharacter();
         const auto player_pos = GW::PlayerMgr::GetPlayerPosition();
         const auto* agents = player_pos ? GW::Agents::GetAgentArray() : nullptr;
         if (!agents) return;
+
+        // Skip stale detection when dead or on the first frame after respawn —
+        // agents near the death location vanish from the array during teleport
+        static bool was_dead = false;
+        const auto* player_living = player ? player->GetAsAgentLiving() : nullptr;
+        const bool is_dead = !player_living || !player_living->GetIsAlive();
+        if (is_dead) { was_dead = true; return; }
+        if (was_dead) { was_dead = false; return; }
 
         if (tracked_enemies_by_agent_id.size() < agents->size()) tracked_enemies_by_agent_id.resize(agents->size());
 
