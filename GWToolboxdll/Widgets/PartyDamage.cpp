@@ -104,6 +104,90 @@ struct PartyDamage::PlayerDamage {
 };
 
 std::vector<PartyDamage::PlayerDamage> PartyDamage::damage;
+std::vector<PartyDamage::PlayerDamage> PartyDamage::departed_damage;
+std::vector<uint32_t> PartyDamage::prev_party_agent_ids;
+
+void PartyDamage::ReconcileDamageIndices() {
+    if (party_agent_ids_by_index == prev_party_agent_ids)
+        return;
+    prev_party_agent_ids = party_agent_ids_by_index;
+
+    // Map old agent_id -> index in current damage array
+    std::unordered_map<uint32_t, uint32_t> old_agent_to_idx;
+    for (uint32_t i = 0; i < damage.size(); i++) {
+        if (damage[i].agent_id != 0)
+            old_agent_to_idx[damage[i].agent_id] = i;
+    }
+
+    // Also index departed entries by name for map-transition recovery
+    std::unordered_map<std::wstring, size_t> departed_by_name;
+    for (size_t i = 0; i < departed_damage.size(); i++) {
+        if (!departed_damage[i].name.empty())
+            departed_by_name[departed_damage[i].name] = i;
+    }
+
+    std::vector<PlayerDamage> new_damage(party_agent_ids_by_index.size());
+    std::unordered_set<uint32_t> claimed_old_indices;
+
+    for (const auto& [agent_id, new_idx] : party_indeces_by_agent_id) {
+        if (new_idx >= new_damage.size()) continue;
+        if (new_idx >= pets_start_idx) continue;
+
+        // Try matching by agent_id first
+        auto it = old_agent_to_idx.find(agent_id);
+        if (it != old_agent_to_idx.end()) {
+            new_damage[new_idx] = damage[it->second];
+            new_damage[new_idx].agent_id = agent_id;
+            claimed_old_indices.insert(it->second);
+            continue;
+        }
+
+        // Agent_id not found (map transition gives new IDs). Try by name.
+        if (new_idx < party_names_by_index.size()) {
+            const auto& name = party_names_by_index[new_idx]->wstring();
+            if (!name.empty()) {
+                // Check departed entries
+                auto dit = departed_by_name.find(name);
+                if (dit != departed_by_name.end()) {
+                    new_damage[new_idx] = departed_damage[dit->second];
+                    new_damage[new_idx].agent_id = agent_id;
+                    departed_damage[dit->second].Reset();
+                    continue;
+                }
+                // Check old damage entries by name
+                for (uint32_t i = 0; i < damage.size(); i++) {
+                    if (!claimed_old_indices.contains(i) && damage[i].name == name && !damage[i].name.empty()) {
+                        new_damage[new_idx] = damage[i];
+                        new_damage[new_idx].agent_id = agent_id;
+                        claimed_old_indices.insert(i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Move unclaimed entries with data to departed
+    for (uint32_t i = 0; i < damage.size(); i++) {
+        if (claimed_old_indices.contains(i)) continue;
+        if (damage[i].damage > 0 || damage[i].healing > 0)
+            departed_damage.push_back(std::move(damage[i]));
+    }
+
+    damage = std::move(new_damage);
+
+    // Recompute totals
+    total = 0;
+    total_healing = 0;
+    for (const auto& entry : damage) {
+        total += entry.damage;
+        total_healing += entry.healing;
+    }
+    for (const auto& entry : departed_damage) {
+        total += entry.damage;
+        total_healing += entry.healing;
+    }
+}
 
 void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
     if (index >= damage.size()) {
@@ -173,18 +257,28 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
     send_queue.push(buffer);
 }
 void PartyDamage::WritePartyDamage() {
+    // Temporarily append departed members so WriteDamageOf can index them
+    const size_t base = damage.size();
+    for (const auto& entry : departed_damage) {
+        if (entry.damage > 0 || entry.healing > 0)
+            damage.push_back(entry);
+    }
+
     std::vector<size_t> idx(damage.size());
     for (size_t i = 0; i < damage.size(); ++i) {
         idx[i] = i;
     }
     sort(idx.begin(), idx.end(), [](const size_t i1, const size_t i2) {
         return damage[i1].damage > damage[i2].damage;
-        });
+    });
 
     for (size_t i = 0; i < idx.size(); ++i) {
         WriteDamageOf(idx[i], i + 1);
     }
     send_queue.push(L"Total ~ Dmg: " + std::to_wstring(total) + L" ~ Heal: " + std::to_wstring(total_healing));
+
+    // Remove the temporarily appended entries
+    damage.resize(base);
 }
 
 void PartyDamage::MapLoadedCallback(GW::HookStatus*, const GW::Packet::StoC::MapLoaded*)
@@ -312,6 +406,8 @@ void PartyDamage::ResetDamage()
     for (auto& entry : damage) {
         entry.Reset();
     }
+    departed_damage.clear();
+    prev_party_agent_ids.clear();
 }
 void PartyDamage::WriteOwnDamage() {
     uint32_t my_index = 0;
@@ -414,16 +510,35 @@ void PartyDamage::Update(const float)
         }
     }
     FetchPartyInfo();
+    ReconcileDamageIndices();
 
-    // Update names for damage entries whose names weren't decoded yet
+    // Update names for damage entries whose names weren't decoded yet,
+    // and restore departed entries when names become available
     for (const auto& [agent_id, party_idx] : party_indeces_by_agent_id) {
         if (party_idx >= damage.size() || party_idx >= party_names_by_index.size())
             continue;
-        if (damage[party_idx].agent_id == 0 || !damage[party_idx].name.empty())
-            continue;
         const auto& decoded = party_names_by_index[party_idx]->wstring();
-        if (!decoded.empty()) {
+        if (decoded.empty()) continue;
+
+        if (damage[party_idx].name.empty() && damage[party_idx].agent_id != 0) {
             damage[party_idx].name = decoded;
+        }
+
+        // Restore departed entry if this slot is empty but a departed member matches by name
+        if (damage[party_idx].damage == 0 && damage[party_idx].healing == 0) {
+            for (auto& dep : departed_damage) {
+                if (dep.name == decoded && (dep.damage > 0 || dep.healing > 0)) {
+                    damage[party_idx] = dep;
+                    damage[party_idx].agent_id = agent_id;
+                    dep.Reset();
+                    // Recompute totals
+                    total = 0;
+                    total_healing = 0;
+                    for (const auto& e : damage) { total += e.damage; total_healing += e.healing; }
+                    for (const auto& e : departed_damage) { total += e.damage; total_healing += e.healing; }
+                    break;
+                }
+            }
         }
     }
 }
