@@ -65,6 +65,7 @@
 #include "QuestModule.h"
 #include <Utils/ToolboxUtils.h>
 #include "ChatFilter.h"
+#include "CameraUnlockModule.h"
 
 constexpr auto CMDTITLE_KEEP_CURRENT = 0xfffe;
 constexpr auto CMDTITLE_REMOVE_CURRENT = 0xffff;
@@ -1417,9 +1418,7 @@ const GW::AgentTargetFlags AnyLivingNpc = GW::TargetFilter::AnyLiving & ~GW::Age
         ImGui::Bullet();
         ImGui::Text("'/call' ping current target.");
         ImGui::Bullet();
-        ImGui::Text("'/camera (lock|unlock)' to lock or unlock the camera.");
-        ImGui::Bullet();
-        ImGui::Text("'/camera fog (on|off)' sets game fog effect on or off.");
+        ImGui::Text(CameraUnlockModule::camera_syntax);
         ImGui::Bullet();
         ImGui::Text(chat_tab_syntax);
         ImGui::Bullet();

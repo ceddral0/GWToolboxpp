@@ -52,6 +52,9 @@ namespace {
     bool print_by_click = false;
     bool overlay_party_window = false;
 
+    bool show_damage = true;
+    bool show_healing = false;
+
     // Distance away from the party window on the x axis; used with snap to party window
     int user_offset = 0;
 
@@ -219,7 +222,7 @@ void PartyDamage::WriteDamageOf(size_t index, uint32_t rank) {
     wchar_t buffer[buffer_size];
 
     const bool has_damage = damage[index].damage > 0;
-    const bool has_healing = damage[index].healing > 0;
+    const bool has_healing = show_healing && damage[index].healing > 0;
 
     if (has_damage && has_healing) {
         swprintf_s(buffer, buffer_size, L"#%2d ~ %ls/%ls %ls ~ Dmg: %3.2f%% (%d) ~ Heal: %3.2f%% (%d)",
@@ -649,7 +652,7 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             }
 
             // Recent damage as percent of total team's recent damage (bottom bar)
-            if (entry->recent_damage) {
+            if (show_damage && entry->recent_damage) {
                 const float part_of_recent = max_recent > 0 ? static_cast<float>(entry->recent_damage) / max_recent : 0;
                 const float recent_left = bars_left ? x + width * (1.0f - part_of_recent) : x;
                 const float recent_right = bars_left ? x + width : x + width * part_of_recent;
@@ -663,7 +666,7 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             }
 
             // Recent healing as percent of total team's recent healing (top bar)
-            if (entry->recent_healing) {
+            if (show_healing && entry->recent_healing) {
                 const float part_of_recent_heal = max_recent_healing > 0 ? static_cast<float>(entry->recent_healing) / max_recent_healing : 0;
                 const float heal_left = bars_left ? x + width * (1.0f - part_of_recent_heal) : x;
                 const float heal_right = bars_left ? x + width : x + width * part_of_recent_heal;
@@ -680,43 +683,44 @@ void PartyDamage::Draw(IDirect3DDevice9* )
             const auto text_height = ImGui::GetTextLineHeight();
             const auto text_y = damage_top_left.y + (row_height - text_height) / 2;
 
-            // Damage text
-            if (damage_float < 1000.f) {
-                snprintf(buffer, buffer_size, "%.0f", damage_float);
-            }
-            else if (damage_float < 1000.f * 10) {
-                snprintf(buffer, buffer_size, "%.2f k", damage_float / 1000.f);
-            }
-            else if (damage_float < 1000.f * 1000.f) {
-                snprintf(buffer, buffer_size, "%.1f k", damage_float / 1000.f);
-            }
-            else {
-                snprintf(buffer, buffer_size, "%.2f m", damage_float / (1000.f * 1000.f));
+            if (show_damage) {
+                // Damage text
+                if (damage_float < 1000.f) {
+                    snprintf(buffer, buffer_size, "%.0f", damage_float);
+                }
+                else if (damage_float < 1000.f * 10) {
+                    snprintf(buffer, buffer_size, "%.2f k", damage_float / 1000.f);
+                }
+                else if (damage_float < 1000.f * 1000.f) {
+                    snprintf(buffer, buffer_size, "%.1f k", damage_float / 1000.f);
+                }
+                else {
+                    snprintf(buffer, buffer_size, "%.2f m", damage_float / (1000.f * 1000.f));
+                }
+
+                draw_list->AddText(ImVec2(x + ImGui::GetStyle().ItemSpacing.x, text_y), IM_COL32(255, 255, 255, 255), buffer);
             }
 
-            draw_list->AddText(
-                ImVec2(x + ImGui::GetStyle().ItemSpacing.x, text_y),
-                IM_COL32(255, 255, 255, 255), buffer);
 
-            // Healing text
-            const float healing_float = static_cast<float>(entry->healing);
-            if (healing_float < 1000.f) {
-                snprintf(buffer, buffer_size, "%.0f", healing_float);
-            }
-            else if (healing_float < 1000.f * 10) {
-                snprintf(buffer, buffer_size, "%.2f k", healing_float / 1000.f);
-            }
-            else if (healing_float < 1000.f * 1000.f) {
-                snprintf(buffer, buffer_size, "%.1f k", healing_float / 1000.f);
-            }
-            else {
-                snprintf(buffer, buffer_size, "%.2f m", healing_float / (1000.f * 1000.f));
+            if (show_healing) {
+                // Healing text
+                const float healing_float = static_cast<float>(entry->healing);
+                if (healing_float < 1000.f) {
+                    snprintf(buffer, buffer_size, "%.0f", healing_float);
+                }
+                else if (healing_float < 1000.f * 10) {
+                    snprintf(buffer, buffer_size, "%.2f k", healing_float / 1000.f);
+                }
+                else if (healing_float < 1000.f * 1000.f) {
+                    snprintf(buffer, buffer_size, "%.1f k", healing_float / 1000.f);
+                }
+                else {
+                    snprintf(buffer, buffer_size, "%.2f m", healing_float / (1000.f * 1000.f));
+                }
+
+                draw_list->AddText(ImVec2(x + width / 2, text_y), color_healing, buffer);
             }
 
-            draw_list->AddText(
-                ImVec2(x + width / 2, text_y),
-                color_healing, buffer
-            );
 
             if (print_by_click
                 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)
@@ -747,6 +751,8 @@ void PartyDamage::LoadSettings(ToolboxIni* ini)
     LOAD_BOOL(print_by_click);
     LOAD_UINT(user_offset);
     LOAD_BOOL(overlay_party_window);
+    LOAD_BOOL(show_damage);
+    LOAD_BOOL(show_healing);
 
 
     if (inifile == nullptr) {
@@ -785,6 +791,8 @@ void PartyDamage::SaveSettings(ToolboxIni* ini)
     SAVE_BOOL(print_by_click);
     SAVE_UINT(user_offset);
     SAVE_BOOL(overlay_party_window);
+    SAVE_BOOL(show_damage);
+    SAVE_BOOL(show_healing);
 
     for (const auto& [player_number, hp] : hp_map) {
         std::string key = std::to_string(player_number);
@@ -804,6 +812,10 @@ void PartyDamage::DrawSettingsInternal()
     ImGui::NextSpacedElement();
     ImGui::Checkbox("Bars towards the left", &bars_left);
     ImGui::ShowHelp("If unchecked, they will expand to the right");
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("Show damage", &show_damage);
+    ImGui::NextSpacedElement();
+    ImGui::Checkbox("Show healing", &show_healing);
 
     ImGui::StartSpacedElements(292.f);
     ImGui::NextSpacedElement();
