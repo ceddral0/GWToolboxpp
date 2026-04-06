@@ -108,6 +108,58 @@ namespace TextUtils {
         return default_val;
     };
 
+    std::string VStrPrintf(const char* format, va_list argv)
+    {
+        va_list argv2;
+        va_copy(argv2, argv);
+        const int len = vsnprintf(nullptr, 0, format, argv);
+        va_end(argv2);
+        if (len < 0) return {};
+        std::string result;
+        va_copy(argv2, argv);
+        result.resize_and_overwrite(len, [&](char* buf, size_t) {
+            vsnprintf(buf, len + 1, format, argv2);
+            return len;
+        });
+        va_end(argv2);
+        return result;
+    }
+
+    std::wstring VStrPrintfW(const wchar_t* format, va_list argv)
+    {
+        va_list argv2;
+        va_copy(argv2, argv);
+        const int len = vswprintf(nullptr, 0, format, argv);
+        va_end(argv2);
+        if (len < 0) return {};
+        std::wstring result;
+        va_copy(argv2, argv);
+        result.resize_and_overwrite(len, [&](wchar_t* buf, size_t) {
+            vswprintf(buf, len + 1, format, argv2);
+            return len;
+        });
+        va_end(argv2);
+        return result;
+    }
+
+    std::string StrPrintf(const char* format, ...)
+    {
+        va_list argv;
+        va_start(argv, format);
+        std::string result = VStrPrintf(format, argv);
+        va_end(argv);
+        return result;
+    }
+
+    std::wstring StrPrintfW(const wchar_t* format, ...)
+    {
+        va_list argv;
+        va_start(argv, format);
+        std::wstring result = VStrPrintfW(format, argv);
+        va_end(argv);
+        return result;
+    }
+
     std::string RemovePunctuation(std::string s)
     {
         std::erase_if(s, [](auto c) { return std::ispunct(c, std::locale()); });
@@ -668,40 +720,40 @@ namespace TextUtils {
     {
         return StringToWString(TimeToString(utc_timestamp, include_seconds));
     }
-    std::string TimeToString(time_t utc_timestamp, bool include_seconds)
+    std::string TimeToString(time_t utc_timestamp, bool include_seconds, int milliseconds)
     {
         const time_t now = time(nullptr);
-        if (!utc_timestamp) {
-            utc_timestamp = now;
-        }
-        const tm* timeinfo = localtime(&utc_timestamp);
-        const tm* nowinfo = localtime(&now);
-
-        if (!timeinfo || !nowinfo) return "Invalid time";
+        if (!utc_timestamp) utc_timestamp = now;
+        std::tm timeinfo, nowinfo;
+        localtime_s(&timeinfo, &utc_timestamp);
+        localtime_s(&nowinfo, &now);
 
         std::string out;
-        if (timeinfo->tm_yday != nowinfo->tm_yday || timeinfo->tm_year != nowinfo->tm_year) {
+        out.reserve(32);
+
+        if (timeinfo.tm_yday != nowinfo.tm_yday || timeinfo.tm_year != nowinfo.tm_year) {
             static constexpr const char* months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-            out += std::format("{} {:02d} ", months[timeinfo->tm_mon], timeinfo->tm_mday);
+            std::format_to(std::back_inserter(out), "{} {:02d} ", months[timeinfo.tm_mon], timeinfo.tm_mday);
         }
-        if (timeinfo->tm_year != nowinfo->tm_year) {
-            out += std::format("{} ", timeinfo->tm_year + 1900);
-        }
-        out += std::format("{:02}:{:02}", timeinfo->tm_hour, timeinfo->tm_min);
-        if (include_seconds) {
-            out += std::format(":{:02}", timeinfo->tm_sec);
-        }
+        if (timeinfo.tm_year != nowinfo.tm_year) std::format_to(std::back_inserter(out), "{} ", timeinfo.tm_year + 1900);
+
+        std::format_to(std::back_inserter(out), "{:02}:{:02}", timeinfo.tm_hour, timeinfo.tm_min);
+
+        if (include_seconds) std::format_to(std::back_inserter(out), ":{:02}", timeinfo.tm_sec);
+
+        if (milliseconds >= 0) std::format_to(std::back_inserter(out), ".{:03}", milliseconds);
+
         return out;
     }
 
-    std::string TimeToString(const uint32_t utc_timestamp, bool include_seconds)
+    std::string TimeToString(const uint32_t utc_timestamp, bool include_seconds, int milliseconds)
     {
-        return TimeToString(static_cast<time_t>(utc_timestamp), include_seconds);
+        return TimeToString(static_cast<time_t>(utc_timestamp), include_seconds, milliseconds);
     }
 
-    std::string TimeToString(const FILETIME utc_timestamp, bool include_seconds)
+    std::string TimeToString(const FILETIME utc_timestamp, bool include_seconds, int milliseconds)
     {
-        return TimeToString(filetime_to_timet(utc_timestamp), include_seconds);
+        return TimeToString(filetime_to_timet(utc_timestamp), include_seconds, milliseconds);
     }
 
     std::vector<std::string> Split(const std::string& in, const std::string& token)
