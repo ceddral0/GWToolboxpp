@@ -27,6 +27,12 @@ namespace TextUtils {
 
     std::string GuidToString(const GUID* guid);
 
+    std::string parseStringFromJson(const nlohmann::json& j, const char* key, const std::string& default_val);
+    int parseIntFromJson(const nlohmann::json& j, const char* key, const int& default_val);
+    bool parseBoolFromJson(const nlohmann::json& j, const char* key, const bool& default_val);
+    uint64_t parseUint64FromJson(const nlohmann::json& j, const char* key, const uint64_t& default_val);
+    float parseFloatFromJson(const nlohmann::json& j, const char* key, const float& default_val);
+
     std::string RemovePunctuation(std::string s);
     std::wstring RemovePunctuation(std::wstring s);
     std::string ToSlug(std::string s);

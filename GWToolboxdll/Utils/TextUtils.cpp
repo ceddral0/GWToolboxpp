@@ -71,6 +71,43 @@ namespace {
 }
 
 namespace TextUtils {
+    std::string parseStringFromJson(const nlohmann::json& j, const char* key, const std::string& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_string()) {
+            return j[key].get<std::string>();
+        }
+        return default_val;
+    };
+    int parseIntFromJson(const nlohmann::json& j, const char* key, const int& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_number_integer()) {
+            return j[key].get<int>();
+        }
+        return default_val;
+    };
+    bool parseBoolFromJson(const nlohmann::json& j, const char* key, const bool& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_boolean()) {
+            return j[key].get<bool>();
+        }
+        return default_val;
+    };
+    uint64_t parseUint64FromJson(const nlohmann::json& j, const char* key, const uint64_t& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key) && j[key].is_number_unsigned()) {
+            return j[key].get<uint64_t>();
+        }
+        return default_val;
+    };
+    float parseFloatFromJson(const nlohmann::json& j, const char* key, const float& default_val)
+    {
+        if (!j.is_discarded() && j.contains(key)) {
+            if (j[key].is_number_float()) return j[key].get<float>();
+            if (j[key].is_number_integer()) return (float)j[key].get<int>();
+        }
+        return default_val;
+    };
+
     std::string RemovePunctuation(std::string s)
     {
         std::erase_if(s, [](auto c) { return std::ispunct(c, std::locale()); });
