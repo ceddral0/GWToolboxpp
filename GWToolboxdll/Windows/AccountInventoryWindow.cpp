@@ -711,7 +711,7 @@ void AccountInventoryWindow::OnInventoryItemClicked(InventoryItem *i, bool move)
     }
 }
 
-void AccountInventoryWindow::OnItemTooltip(std::shared_ptr<MergeStack> ms)
+void AccountInventoryWindow::OnItemTooltip(const MergeStack *ms)
 {
     std::wstring current_account = GetAccountEmail();
     std::wstring prev_character{};
@@ -778,7 +778,7 @@ void AccountInventoryWindow::SortInventory(ImGuiTableSortSpecs* sort_specs)
         }
     }
     inventory_sorted.clear();
-    std::unordered_map<std::wstring, std::shared_ptr<MergeStack>> merged_stacks{};
+    std::unordered_map<std::wstring, size_t> merged_stacks{};
     for (auto it = inventory.begin(); it != inventory.end(); ++it) {
         auto i = it->get();
         if ((uint32_t)GW::Constants::HeroID::Merc1 <= i->hero_id && i->hero_id <= (uint32_t)GW::Constants::HeroID::Merc8) {
@@ -801,15 +801,11 @@ void AccountInventoryWindow::SortInventory(ImGuiTableSortSpecs* sort_specs)
         }
         // some hero armor like Jin and Sousukes 'Zaishen Gloves' would be stacked together without model_id
         auto merge_id = std::to_wstring(i->item_partial.model_id) + i->description;
-        std::shared_ptr<MergeStack> ms;
-        if (merge_stacks && merged_stacks.contains(merge_id)) {
-            ms = merged_stacks[merge_id];
-        } else {
-            ms = std::make_shared<MergeStack>(current_account);
-            inventory_sorted.push_back(ms);
-            merged_stacks[merge_id] = ms;
-            ms->description = i->description;
+        if (!merge_stacks || !merged_stacks.contains(merge_id)) {
+            merged_stacks[merge_id] = inventory_sorted.size();
+            inventory_sorted.push_back(MergeStack(current_account, i->description));
         }
+        MergeStack *ms = &inventory_sorted[merged_stacks[merge_id]];
         ms->quantity += i->item_partial.quantity;
         ms->i.insert(i);
     }
@@ -1011,18 +1007,18 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
         bool item_is_lower = std::all_of(item_filter.begin(), item_filter.end(), [](unsigned char c){ return !std::isupper(c); });
         filtered_item_count = 0;
         for (auto & ims: inventory_sorted) {
-            auto i_front = *(ims->i.begin());
-            std::wstring description = ims->description;
-            if (ims->quantity > 1) {
-                description = std::to_wstring(ims->quantity) + L" " + description;
+            auto i_front = *(ims.i.begin());
+            std::wstring description = ims.description;
+            if (ims.quantity > 1) {
+                description = std::to_wstring(ims.quantity) + L" " + description;
             }
             auto description_one_line = TextUtils::ctre_regex_replace<L"\n", L" - ">(description);
-            uint16_t quantity = ims->quantity;
+            uint16_t quantity = ims.quantity;
 
             // filter item
             bool filter_match = false;
             uint16_t filtered_quantity = 0;
-            for (auto it = ims->i.begin(); it != ims->i.end(); it++) {
+            for (auto it = ims.i.begin(); it != ims.i.end(); it++) {
                 std::wstring character_check = (*it)->character;
                 std::string location_check = (*it)->location;
                 if (name_is_lower) {
@@ -1094,7 +1090,7 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
                 }
             }
             if (detailed_view) {
-                std::string suffix = (ims->i.size() > 1) ? " +" : "";
+                std::string suffix = (ims.i.size() > 1) ? " +" : "";
                 ImGui::Text("%s%s", TextUtils::WStringToString(i_front->character).c_str(), suffix.c_str());
                 ImGui::TableNextColumn();
 
@@ -1107,7 +1103,7 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
                 style.ButtonTextAlign = ImVec2(0.f, 0.5f);
                 clicked = ImGui::Button(TextUtils::WStringToString(description_one_line).c_str());
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip([ims]() { AccountInventoryWindow::Instance().OnItemTooltip(ims); });
+                    ImGui::SetTooltip([ms=&ims]() { AccountInventoryWindow::Instance().OnItemTooltip(ms); });
                 }
                 ImGui::TableNextColumn();
             } else { // grid view
@@ -1125,7 +1121,7 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
                     ImGui::Dummy(ImVec2(w, w));
                 }
                 if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip([ims]() { AccountInventoryWindow::Instance().OnItemTooltip(ims); });
+                    ImGui::SetTooltip([ms=&ims]() { AccountInventoryWindow::Instance().OnItemTooltip(ms); });
                 }
                 ImGui::TableNextColumn();
             }
@@ -1294,7 +1290,8 @@ std::shared_ptr<AccountInventoryWindow::InventoryIni> AccountInventoryWindow::Ge
 
 void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
 {
-    ToolboxIni::TNamesDepend entries{};
+    (void) only_foreign;
+    /*ToolboxIni::TNamesDepend entries{};
     std::wstring current_account = GetAccountEmail();
 
     Resources::EnsureFolderExists(Resources::GetPath(L"inventories"));
@@ -1382,14 +1379,13 @@ void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
             i.item_partial.quantity = (uint16_t)(ini->GetLongValue(section, "quantity", 0));
             i.item_partial.equipped = (uint8_t)(ini->GetLongValue(section, "equipped", 0));
             i.item_partial.item_id = 0;
-            i.texture = Resources::GetItemImage(&(i.item_partial));
+            i.texture = Resources::GetItemImage(&i.item_partial);
             i.location = HERO_NAME[i.hero_id];
             if (IsChestBag(i.bag_id)) {
                 i.location = BAG_NAME[(int)(i.bag_id)];
             }
-            DescriptionDecode(i);
-
             inventory_rebuild.insert(std::make_unique<InventoryItem>(i));
+            DescriptionDecode(i, &inventory_rebuild);
         }
     }
     if (only_foreign) {
@@ -1408,6 +1404,7 @@ void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
     free_slots = free_slots_rebuild;
     inventory = std::move(inventory_rebuild);
     needs_sorting = true;
+*/
 }
 
 void AccountInventoryWindow::SaveToFiles(bool include_foreign)
@@ -1505,9 +1502,21 @@ void AccountInventoryWindow::SaveToFiles(bool include_foreign)
     inventory_dirty.clear();
 }
 
-void AccountInventoryWindow::DescriptionDecode(InventoryItem &i)
+void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventoryp)
 {
-    std::wstring description_enc = L"";
+    struct SyncDecode {
+        std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventory;
+        InventoryItem i;
+        std::wstring enc;
+    };
+    auto sync = new SyncDecode{};
+    sync->inventory = inventoryp;
+    sync->i.account = i.account;
+    sync->i.character = i.character;
+    sync->i.hero_id = i.hero_id;
+    sync->i.bag_id = i.bag_id;
+    sync->i.slot = i.slot;
+    sync->i.item_partial.item_id = i.item_partial.item_id;
     switch (i.item_partial.type) {
         case GW::Constants::ItemType::Headpiece:
         case GW::Constants::ItemType::Boots:
@@ -1519,26 +1528,35 @@ void AccountInventoryWindow::DescriptionDecode(InventoryItem &i)
         default:
             // Default to single_item_name so merge_stacks can combine stacks of single and multiple items.
             if (i.item_partial.single_item_name) {
-                description_enc += i.item_partial.single_item_name;
+                sync->enc += i.item_partial.single_item_name;
             } else if (i.item_partial.complete_name_enc) {
-                description_enc += i.item_partial.complete_name_enc;
+                sync->enc += i.item_partial.complete_name_enc;
             } else if (i.item_partial.name_enc) {
-                description_enc += i.item_partial.name_enc;
+                sync->enc += i.item_partial.name_enc;
             }
     }
     if (i.item_partial.info_string) {
-        auto shorthand_description = ToolboxUtils::ShorthandItemDescription(&(i.item_partial));
+        auto shorthand_description = ToolboxUtils::ShorthandItemDescription(&i.item_partial);
         // If item info_string starts with "Value:", ShorthandItemDescription doesn't filter the "Value:" part out.
         // Since "Value:" is typically at the end of the description, there is nothing left that we care about anyway.
         // Add description only if it does not start with "Value:".
         if (shorthand_description.find(L"\xA3E\x10A\xA8A\x10A\xA59\x1\x10B") != 0) {
-            if (!description_enc.empty()) {
-                description_enc += L"\x2\x102\x2";
+            if (!sync->enc.empty()) {
+                sync->enc += L"\x2\x102\x2";
             }
-            description_enc += shorthand_description;
+            sync->enc += shorthand_description;
         }
     }
-    GW::UI::AsyncDecodeStr(description_enc.c_str(), &(i.description), (GW::Constants::Language)0xff);
+    //GW::UI::AsyncDecodeStr(description_enc.c_str(), &description_dec, (GW::Constants::Language)0xff);
+    GW::UI::AsyncDecodeStr(sync->enc.c_str(), [](void* param, const wchar_t* s) {
+        auto sync = (struct SyncDecode *)param;
+        if (auto it = sync->inventory->find(&sync->i); it != sync->inventory->end()) {
+            if ((*it)->item_partial.item_id == sync->i.item_partial.item_id) {
+                (*it)->description = TextUtils::StripTags(s);
+            }
+        }
+        delete sync;
+    }, sync);
 }
 
 void AccountInventoryWindow::AddItem(uint32_t item_id)
@@ -1615,9 +1633,8 @@ void AccountInventoryWindow::AddItem(uint32_t item_id)
     i.item_partial.quantity = item->quantity;
     i.item_partial.equipped = item->equipped;
     i.item_partial.item_id = item->item_id;
-    i.texture = Resources::GetItemImage(&(i.item_partial));
+    i.texture = Resources::GetItemImage(&i.item_partial);
     i.location = HERO_NAME[i.hero_id];
-    DescriptionDecode(i);
     if (IsChestBag(i.bag_id)) {
         i.location = BAG_NAME[(int)(i.bag_id)];
     }
@@ -1642,6 +1659,7 @@ void AccountInventoryWindow::AddItem(uint32_t item_id)
     auto ip = std::make_unique<InventoryItem>(i);
     inventory_lookup[item->item_id] = ip.get();
     inventory.insert(std::move(ip));
+    DescriptionDecode(i, &inventory);
     needs_sorting = true;
 
     if (item_to_move && (uint32_t)GW::Constants::HeroID::NoHero != i.hero_id && ItemEqual{}(item_to_move, &i)) {
