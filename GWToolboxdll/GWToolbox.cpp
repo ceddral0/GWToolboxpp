@@ -319,7 +319,7 @@ namespace {
             return false;
         }
         return !gwtoolbox_disabled
-               && !GW::GetPreGameContext()
+               //&& !GW::GetPreGameContext()
                && !GW::Map::GetIsInCinematic()
                && !IsIconic(GW::MemoryMgr::GetGWWindowHandle())
                && (!ToolboxSettings::hide_on_loading_screen || GW::Map::GetInstanceType() != GW::Constants::InstanceType::Loading)
