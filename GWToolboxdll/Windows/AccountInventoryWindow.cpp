@@ -262,12 +262,11 @@ void AccountInventoryWindow::PreMapLoad()
     std::wstring characters[] = {L"(Chest)", current_character};
     for (auto & character: characters) {
         if (character.empty()) continue;
-        auto it = free_slots.find(std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{current_account, character}));
-        std::shared_ptr<CharacterFreeSlots> free_slot = nullptr;
-        if (it != free_slots.end()) {
-            free_slot = (*it);
-        } else {
-            free_slot = std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{current_account, character});
+        CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, character};
+        free_slots.insert(std::make_unique<CharacterFreeSlots>(free_slot));
+        auto it = free_slots.find(&free_slot);
+        CharacterFreeSlots* free_slot_p = it->get();
+        if (free_slot_p->account_representing_character.empty()) {
             auto available_characters = GW::AccountMgr::GetAvailableChars();
             if (available_characters->size() > 0) {
                 // alphabetically first character name, to be shown in tooltip to distinguish chests from multiple accounts without showing email addresses
@@ -275,15 +274,14 @@ void AccountInventoryWindow::PreMapLoad()
                 for (const auto& available_char : *available_characters) {
                     if (!min || wcscmp(available_char.player_name, min) < 0) min = available_char.player_name;
                 }
-                free_slot->account_representing_character = min;
+                free_slot_p->account_representing_character = min;
             }
-            free_slots.insert(free_slot);
         }
         if (character == current_character) {
-            free_slot->occupied_equipment = 0;
-            free_slot->occupied_inventory = 0;
+            free_slot_p->occupied_equipment = 0;
+            free_slot_p->occupied_inventory = 0;
         } else {
-            free_slot->occupied_inventory = 0;
+            free_slot_p->occupied_inventory = 0;
         }
     }
     if (!(reroll_stage == RerollStage::None || reroll_stage == RerollStage::WaitForCharacterLoad || reroll_stage >= RerollStage::RerollToItem)) {
@@ -371,7 +369,8 @@ void AccountInventoryWindow::PostMapLoad()
         }
         std::wstring characters[] = {L"(Chest)", current_character};
         for (auto & character: characters) {
-            if (auto it = free_slots.find(std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{current_account, character})); it != free_slots.end()) {
+            CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, character};
+            if (auto it = free_slots.find(&free_slot); it != free_slots.end()) {
                 if (character == current_character) {
                     (*it)->max_equipment = max_equipment;
                     (*it)->max_inventory = max_inventory;
@@ -402,7 +401,10 @@ void AccountInventoryWindow::PostMapLoad()
                     if (auto avail = availableChars.find((*it)->character); avail == availableChars.end()) {
                         // not found
                         inventory_dirty.insert(GetIniID((*it)->account, (*it)->character));
-                        free_slots.erase(std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{current_account, (*it)->character}));
+                        CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, (*it)->character};
+                        if (auto fs_it = free_slots.find(&free_slot); fs_it != free_slots.end()) {
+                            free_slots.erase(fs_it);
+                        }
                         inventory_lookup.erase((*it)->item_partial.item_id);
                         it = inventory.erase(it);
                         continue;
@@ -724,7 +726,8 @@ void AccountInventoryWindow::OnItemTooltip(const MergeStack *ms)
             ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         }
         std::wstring account_representing_character;
-        if (auto fs_it = free_slots.find(std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{(*it)->account, (*it)->character})); fs_it != free_slots.end()) {
+        CharacterFreeSlots free_slot = CharacterFreeSlots{(*it)->account, (*it)->character};
+        if (auto fs_it = free_slots.find(&free_slot); fs_it != free_slots.end()) {
             account_representing_character = (*fs_it)->account_representing_character;
         }
         bool reprint = (*it)->character != prev_character || account_representing_character != prev_account_representing_character;
@@ -757,12 +760,12 @@ void AccountInventoryWindow::OnItemTooltip(const MergeStack *ms)
 void AccountInventoryWindow::SortSlots(ImGuiTableSortSpecs* sort_specs)
 {
     std::wstring current_account = GetAccountEmail();
-    free_slots_sorted = std::set<std::shared_ptr<CharacterFreeSlots>, SlotCompare>(SlotCompare{sort_specs});
+    free_slots_sorted = std::set<CharacterFreeSlots*, SlotCompare>(SlotCompare{sort_specs});
     for (auto & free_slot: free_slots) {
         if (hide_other_accounts && free_slot->account != current_account) {
             continue;
         }
-        free_slots_sorted.insert(free_slot);
+        free_slots_sorted.insert(free_slot.get());
     }
 }
 
@@ -1297,7 +1300,7 @@ void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
     Resources::EnsureFolderExists(Resources::GetPath(L"inventories"));
     std::unordered_set<std::filesystem::path> visited;
     std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual> inventory_rebuild{};
-    std::unordered_set<std::shared_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots_rebuild{};
+    std::unordered_set<std::unique_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots_rebuild{};
     for (auto const &file: std::filesystem::directory_iterator{Resources::GetPath(L"inventories")}) {
         auto path = file.path();
         visited.insert(path);
@@ -1327,16 +1330,16 @@ void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
             if (only_foreign && account == current_account) continue;
             
             if (std::string_view(section) == "freeslots") {
-                auto free_slot = std::make_shared<CharacterFreeSlots>();
-                free_slot->account = account;
-                free_slot->character = character;
-                free_slot->account_representing_character = TextUtils::Base64Decode<wchar_t>(ini->GetValue(section, "account_character", ""));
-                free_slot->max_equipment = (int)(ini->GetLongValue(section, "maxequipment", 0));
-                free_slot->max_inventory = (int)(ini->GetLongValue(section, "maxinventory", 0));
-                free_slot->occupied_equipment = (int)(ini->GetLongValue(section, "occupiedequipment", 0));
-                free_slot->occupied_inventory = (int)(ini->GetLongValue(section, "occupiedinventory", 0));
-                free_slot->anniversary_pane_active = ini->GetBoolValue(section, "anniversary_pane_active", false);
-                free_slots_rebuild.insert(free_slot);
+                CharacterFreeSlots free_slot;
+                free_slot.account = account;
+                free_slot.character = character;
+                free_slot.account_representing_character = TextUtils::Base64Decode<wchar_t>(ini->GetValue(section, "account_character", ""));
+                free_slot.max_equipment = (int)(ini->GetLongValue(section, "maxequipment", 0));
+                free_slot.max_inventory = (int)(ini->GetLongValue(section, "maxinventory", 0));
+                free_slot.occupied_equipment = (int)(ini->GetLongValue(section, "occupiedequipment", 0));
+                free_slot.occupied_inventory = (int)(ini->GetLongValue(section, "occupiedinventory", 0));
+                free_slot.anniversary_pane_active = ini->GetBoolValue(section, "anniversary_pane_active", false);
+                free_slots_rebuild.insert(std::make_unique<CharacterFreeSlots>(free_slot));
                 continue;
             }
 
@@ -1395,13 +1398,15 @@ void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
             } else ++it;
         }
         for (auto it = free_slots.begin(); it != free_slots.end(); ++it) {
-            if ((*it)->account == current_account) free_slots_rebuild.insert(*it);
+            if ((*it)->account == current_account) {
+                free_slots_rebuild.insert(free_slots.extract(it++));
+            } else ++it;
         }
     }
     for (auto it = ini_by_path.begin(); it != ini_by_path.end(); ++it) {
         if (!visited.contains(it->first)) it->second->Reset();
     }
-    free_slots = free_slots_rebuild;
+    free_slots = std::move(free_slots_rebuild);
     inventory = std::move(inventory_rebuild);
     needs_sorting = true;
 */
@@ -1502,7 +1507,7 @@ void AccountInventoryWindow::SaveToFiles(bool include_foreign)
     inventory_dirty.clear();
 }
 
-void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventoryp)
+void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventory_p)
 {
     struct SyncDecode {
         std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventory;
@@ -1510,7 +1515,7 @@ void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_
         std::wstring enc;
     };
     auto sync = new SyncDecode{};
-    sync->inventory = inventoryp;
+    sync->inventory = inventory_p;
     sync->i.account = i.account;
     sync->i.character = i.character;
     sync->i.hero_id = i.hero_id;
@@ -1547,7 +1552,6 @@ void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_
             sync->enc += shorthand_description;
         }
     }
-    //GW::UI::AsyncDecodeStr(description_enc.c_str(), &description_dec, (GW::Constants::Language)0xff);
     GW::UI::AsyncDecodeStr(sync->enc.c_str(), [](void* param, const wchar_t* s) {
         auto sync = (struct SyncDecode *)param;
         if (auto it = sync->inventory->find(&sync->i); it != sync->inventory->end()) {
@@ -1639,7 +1643,8 @@ void AccountInventoryWindow::AddItem(uint32_t item_id)
         i.location = BAG_NAME[(int)(i.bag_id)];
     }
 
-    if (auto it = free_slots.find(std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{current_account, i.character})); it != free_slots.end()) {
+    CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, i.character};
+    if (auto it = free_slots.find(&free_slot); it != free_slots.end()) {
         if (i.bag_id == (uint32_t)GW::Constants::Bag::Equipment_Pack) {
             (*it)->occupied_equipment++;
         } else if (BAG_CAN_HOLD_ANYTHING[i.bag_id]) {
@@ -1694,7 +1699,8 @@ bool AccountInventoryWindow::RemoveItem(uint32_t item_id)
 
     std::wstring current_account = GetAccountEmail();
     auto i = inventory_lookup[item_id];
-    if (auto it = free_slots.find(std::make_shared<CharacterFreeSlots>(CharacterFreeSlots{current_account, i->character})); it != free_slots.end()) {
+    CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, i->character};
+    if (auto it = free_slots.find(&free_slot); it != free_slots.end()) {
         if (i->bag_id == (uint32_t)GW::Constants::Bag::Equipment_Pack) {
             (*it)->occupied_equipment--;
         } else if (BAG_CAN_HOLD_ANYTHING[i->bag_id]) {

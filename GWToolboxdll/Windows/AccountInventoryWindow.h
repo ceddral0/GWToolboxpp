@@ -187,7 +187,7 @@ class AccountInventoryWindow : public ToolboxWindow {
 
     struct SlotCompare {
         ImGuiTableSortSpecs* sort_specs{};
-        bool operator()(const std::shared_ptr<CharacterFreeSlots> l, const std::shared_ptr<CharacterFreeSlots> r) const
+        bool operator()(CharacterFreeSlots const * const l, CharacterFreeSlots const * const r) const
         {
             int sort_direction = 1;
             int delta = 0;
@@ -228,7 +228,16 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct SlotHash {
-        std::size_t operator()(const std::shared_ptr<CharacterFreeSlots> i) const noexcept
+        using is_transparent = void;
+        std::size_t operator()(const std::unique_ptr<CharacterFreeSlots> &i) const noexcept
+        {
+            return operator()(std::to_address(i));
+        }
+        std::size_t operator()(CharacterFreeSlots const * const * const i) const noexcept
+        {
+            return operator()(*i);
+        }
+        std::size_t operator()(CharacterFreeSlots const * const i) const noexcept
         {
             std::size_t h1 = std::hash<std::wstring>{}(i->account);
             std::size_t h2 = std::hash<std::wstring>{}(i->character);
@@ -237,7 +246,20 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct SlotEqual {
-        bool operator()(const std::shared_ptr<CharacterFreeSlots> l, const std::shared_ptr<CharacterFreeSlots> r) const
+        using is_transparent = void;
+        bool operator()(const std::unique_ptr<CharacterFreeSlots> &l, const std::unique_ptr<CharacterFreeSlots> &r) const
+        {
+            return operator()(std::to_address(l), std::to_address(r));
+        }
+        bool operator()(CharacterFreeSlots const * const l, const std::unique_ptr<CharacterFreeSlots> &r) const
+        {
+            return operator()(l, std::to_address(r));
+        }
+        bool operator()(CharacterFreeSlots const * const * const l, const std::unique_ptr<CharacterFreeSlots> &r) const
+        {
+            return operator()(*l, std::to_address(r));
+        }
+        bool operator()(CharacterFreeSlots const * const l, CharacterFreeSlots const * const r) const
         {
             return l->account == r->account && l->character == r->character;
         }
@@ -290,9 +312,9 @@ class AccountInventoryWindow : public ToolboxWindow {
     // change tracker to reduce writes
     std::unordered_set<std::wstring> inventory_dirty{};
     // tracking of free inventory slot numbers
-    std::unordered_set<std::shared_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots{};
+    std::unordered_set<std::unique_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots{};
     // sorted/filtered view for display
-    std::set<std::shared_ptr<CharacterFreeSlots>, SlotCompare> free_slots_sorted{};
+    std::set<CharacterFreeSlots*, SlotCompare> free_slots_sorted{};
     // tracking for hero_id <-> Equipped_Items bag
     // we rely on hero items being created in the order of heroes in the party
     std::queue<GW::Bag *> hero_bag_generation_order{};
