@@ -62,6 +62,19 @@ class AccountInventoryWindow : public ToolboxWindow {
         std::wstring description{}; // output of AsyncDecodeStr(ShorthandItemDescription)
         std::string location{}; // (Player) <Storage Pane> or <Hero Name>
 
+        InventoryItem () = default;
+        // copying would break the pointers from item_partial to the wstrings in this struct
+        InventoryItem (const InventoryItem&) = delete;
+        InventoryItem& operator= (const InventoryItem&) = delete;
+
+        void CopyKeyTo(InventoryItem *i) {
+            i->account = account;
+            i->character = character;
+            i->hero_id = hero_id;
+            i->bag_id = bag_id;
+            i->slot = slot;
+            i->item_partial.item_id = item_partial.item_id;
+        }
     };
 
     struct MergeStack;
@@ -281,14 +294,14 @@ class AccountInventoryWindow : public ToolboxWindow {
     }
 
     void OnInventoryItemClicked(InventoryItem *i, bool move);
-    static bool CheckIniDirty(std::shared_ptr<InventoryIni> ini);
-    std::shared_ptr<InventoryIni> GetIni(std::wstring ini_ID, std::wstring account);
+    static bool CheckIniDirty(InventoryIni *ini);
+    InventoryIni* GetIni(std::wstring ini_ID, std::wstring account);
     std::string ItemToSectionName(InventoryItem *i) const;
     void LoadFromFiles(bool only_foreign);
     void SaveToFiles(bool include_foreign);
     void SortInventory(ImGuiTableSortSpecs* sort_specs);
     void SortSlots(ImGuiTableSortSpecs* sort_specs);
-    void DescriptionDecode(InventoryItem &i, std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventoryp);
+    void DescriptionDecode(InventoryItem *i);
     void ClearMissingItem(std::wstring account, std::wstring character, uint32_t hero_id, uint32_t bag_id, uint32_t slot);
     // state machine for rerolling to items, internal functions
     void StepReroll();
@@ -307,14 +320,14 @@ class AccountInventoryWindow : public ToolboxWindow {
     // sorted/filtered view for display
     std::vector<MergeStack> inventory_sorted{};
     // ini files, 1 per character/chest
-    std::unordered_map<std::filesystem::path, std::shared_ptr<InventoryIni>> ini_by_path{};
-    std::unordered_map<std::wstring, std::shared_ptr<InventoryIni>> ini_by_character{};
+    std::unordered_map<std::filesystem::path, std::unique_ptr<InventoryIni>> ini_by_path{};
+    std::unordered_map<std::wstring, InventoryIni*> ini_by_character{};
     // change tracker to reduce writes
     std::unordered_set<std::wstring> inventory_dirty{};
     // tracking of free inventory slot numbers
     std::unordered_set<std::unique_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots{};
     // sorted/filtered view for display
-    std::set<CharacterFreeSlots*, SlotCompare> free_slots_sorted{};
+    std::set<CharacterFreeSlots *, SlotCompare> free_slots_sorted{};
     // tracking for hero_id <-> Equipped_Items bag
     // we rely on hero items being created in the order of heroes in the party
     std::queue<GW::Bag *> hero_bag_generation_order{};
@@ -361,8 +374,8 @@ public:
         return instance;
     }
 
-    [[nodiscard]] const char* Name() const override { return "Account Inventory"; }
-    [[nodiscard]] const char* Icon() const override { return ICON_FA_USERS; }
+    [[nodiscard]] const char *Name() const override { return "Account Inventory"; }
+    [[nodiscard]] const char *Icon() const override { return ICON_FA_USERS; }
 
     // callbacks
 
@@ -370,11 +383,11 @@ public:
     void Terminate() override;
     void Update(float delta) override;
 
-    void Draw(IDirect3DDevice9* pDevice) override;
+    void Draw(IDirect3DDevice9 * pDevice) override;
     void DrawSettingsInternal() override;
 
-    void LoadSettings(ToolboxIni* ini) override;
-    void SaveSettings(ToolboxIni* ini) override;
+    void LoadSettings(ToolboxIni * ini) override;
+    void SaveSettings(ToolboxIni * ini) override;
 
     void HandleHeroBag(uint32_t hero_id);
     void GatherAllInventories();

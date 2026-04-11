@@ -185,7 +185,6 @@ void AccountInventoryWindow::Initialize()
         );
     }
     initializing = true;
-    /*
     LoadFromFiles(false);
     auto ic = GW::GetItemContext();
     if (ic) {
@@ -198,7 +197,6 @@ void AccountInventoryWindow::Initialize()
         }
         PostMapLoad();
     }
-    */
     initializing = false;
 }
 
@@ -210,8 +208,8 @@ void AccountInventoryWindow::Terminate()
     inventory_sorted.clear();
     while (!hero_bag_generation_order.empty()) hero_bag_generation_order.pop();
     bag_ptr_to_hero_id.clear();
-    ini_by_path.clear();
     ini_by_character.clear();
+    ini_by_path.clear();
     inventory_dirty.clear();
     free_slots.clear();
     free_slots_sorted.clear();
@@ -279,10 +277,8 @@ void AccountInventoryWindow::PreMapLoad()
         }
         if (character == current_character) {
             free_slot_p->occupied_equipment = 0;
-            free_slot_p->occupied_inventory = 0;
-        } else {
-            free_slot_p->occupied_inventory = 0;
         }
+        free_slot_p->occupied_inventory = 0;
     }
     if (!(reroll_stage == RerollStage::None || reroll_stage == RerollStage::WaitForCharacterLoad || reroll_stage >= RerollStage::RerollToItem)) {
         // map load at an inappropriate time during GatherAllInventories, e.g. due to manual intervention or network issues
@@ -450,7 +446,7 @@ void AccountInventoryWindow::HandleHeroBag(uint32_t hero_id)
 {
     if (initializing) return;
     // If two parties are joined in a way s.t. our hero is in a different position afterwards,
-    // it gets added a again, so we readd the hero bag we already know.
+    // it gets added again, so we readd the hero bag we already know.
     // Otherwise the heroes bag should have been added to hero_bag_generation_order before this,
     // since hero bags are never empty.
     GW::Bag * bag = OnPartyRemoveHero(hero_id);
@@ -648,7 +644,12 @@ void AccountInventoryWindow::MoveItem()
     delete item_to_move;
     item_to_move = nullptr;
     if (it == inventory.end()) return;
-    auto i = new InventoryItem(**it);
+    auto i = new InventoryItem();
+    i->character = (*it)->character;
+    i->bag_id = (*it)->bag_id;
+    i->slot = (*it)->slot;
+    i->item_partial.model_id = (*it)->item_partial.model_id;
+    i->item_partial.item_id = (*it)->item_partial.item_id;
 
     // can only move from current player or from chest
     if (i->character != std::wstring(GW::AccountMgr::GetCurrentPlayerName()) && !IsChestBag(i->bag_id)) return;
@@ -673,7 +674,7 @@ void AccountInventoryWindow::OnInventoryItemClicked(InventoryItem *i, bool move)
     if (move) {
         if (IsHeroArmor(i->hero_id, i->slot)) return; // can not unequip hero armor
         item_to_move = new InventoryItem();
-        *item_to_move = *i;
+        i->CopyKeyTo(item_to_move);
     } else if (item_to_move) {
         delete item_to_move;
         item_to_move = nullptr;
@@ -767,6 +768,7 @@ void AccountInventoryWindow::SortSlots(ImGuiTableSortSpecs* sort_specs)
         }
         free_slots_sorted.insert(free_slot.get());
     }
+    if (sort_specs) sort_specs->SpecsDirty = false;
 }
 
 void AccountInventoryWindow::SortInventory(ImGuiTableSortSpecs* sort_specs)
@@ -900,7 +902,7 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
             ImGui::TableHeadersRow();
             ImGui::TableNextRow();
             ImGuiTableSortSpecs* slot_sort_specs = ImGui::TableGetSortSpecs();
-            if (slot_sort_specs && slot_sort_specs->SpecsDirty) {
+            if (needs_sorting || (slot_sort_specs && slot_sort_specs->SpecsDirty)) {
                 SortSlots(slot_sort_specs);
             }
             for (auto & free_slot: free_slots_sorted) {
@@ -920,7 +922,10 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
                 if (free_slot->account == current_account) {
                     if (ImGui::Button(TextUtils::WStringToString(free_slot->character).c_str())) {
                         // reroll to target or open chest
-                        auto i = InventoryItem{free_slot->account, free_slot->character, 0, is_chest ? (uint32_t)GW::Constants::Bag::Storage_1 : 0, 0};
+                        InventoryItem i;
+                        i.account = free_slot->account;
+                        i.character = free_slot->character;
+                        i.bag_id = is_chest ? (uint32_t)GW::Constants::Bag::Storage_1 : 0;
                         OnInventoryItemClicked(&i, false);
                     }
                 } else {
@@ -1157,6 +1162,7 @@ void AccountInventoryWindow::DrawSettingsInternal()
         inventory_lookup.clear();
         inventory_sorted.clear();
         free_slots.clear();
+        free_slots_sorted.clear();
         for (auto it = ini_by_character.begin(); it != ini_by_character.end(); ++it) {
             inventory_dirty.insert(it->first);
         }
@@ -1170,6 +1176,7 @@ void AccountInventoryWindow::DrawSettingsInternal()
         inventory_lookup.clear();
         inventory_sorted.clear();
         free_slots.clear();
+        free_slots_sorted.clear();
         for (auto it = ini_by_path.begin(); it != ini_by_path.end(); ++it) {
             it->second->Reset();
         }
@@ -1253,7 +1260,7 @@ std::string AccountInventoryWindow::ItemToSectionName(InventoryItem *i) const
     return out;
 }
 
-bool AccountInventoryWindow::CheckIniDirty(std::shared_ptr<InventoryIni> ini)
+bool AccountInventoryWindow::CheckIniDirty(InventoryIni *ini)
 {
     FILETIME change_time;
     HANDLE f = CreateFileW(ini->location_on_disk.wstring().c_str(),
@@ -1274,7 +1281,7 @@ bool AccountInventoryWindow::CheckIniDirty(std::shared_ptr<InventoryIni> ini)
     return false;
 }
 
-std::shared_ptr<AccountInventoryWindow::InventoryIni> AccountInventoryWindow::GetIni(std::wstring ini_ID, std::wstring account)
+AccountInventoryWindow::InventoryIni* AccountInventoryWindow::GetIni(std::wstring ini_ID, std::wstring account)
 {
     if (!ini_by_character.contains(ini_ID)) {
         wchar_t path[MAX_PATH];
@@ -1282,32 +1289,43 @@ std::shared_ptr<AccountInventoryWindow::InventoryIni> AccountInventoryWindow::Ge
             Log::Error("Account Inventory: Failed to create inventory ini. Inventory tracking data will be lost.");
             return nullptr;
         }
-        auto ini = std::make_shared<InventoryIni>(path);
+        auto ini = std::make_unique<InventoryIni>(path);
         ini->ini_ID = ini_ID;
         ini->account = account;
-        ini_by_character[ini_ID] = ini;
-        ini_by_path[path] = ini_by_character[ini_ID];
+        ini_by_character[ini_ID] = ini.get();
+        ini_by_path[path] = std::move(ini);
     }
     return ini_by_character[ini_ID];
 }
 
 void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
 {
-    (void) only_foreign;
-    /*ToolboxIni::TNamesDepend entries{};
+    ToolboxIni::TNamesDepend entries{};
     std::wstring current_account = GetAccountEmail();
 
     Resources::EnsureFolderExists(Resources::GetPath(L"inventories"));
     std::unordered_set<std::filesystem::path> visited;
-    std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual> inventory_rebuild{};
-    std::unordered_set<std::unique_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots_rebuild{};
+    if (only_foreign) {
+        for (auto it = inventory.begin(); it != inventory.end();) {
+            if ((*it)->account != current_account) {
+                it = inventory.erase(it);
+            } else ++it;
+        }
+        for (auto it = free_slots.begin(); it != free_slots.end();) {
+            if ((*it)->account != current_account) {
+                it = free_slots.erase(it);
+            } else ++it;
+        }
+    } else {
+        inventory_lookup.clear();
+    }
     for (auto const &file: std::filesystem::directory_iterator{Resources::GetPath(L"inventories")}) {
         auto path = file.path();
         visited.insert(path);
         if (!ini_by_path.contains(path)) {
-            ini_by_path[path] = std::make_shared<InventoryIni>(path);
+            ini_by_path[path] = std::make_unique<InventoryIni>(path);
         }
-        auto ini = ini_by_path[path];
+        auto ini = ini_by_path[path].get();
         if (only_foreign && ini->account == current_account) continue;
         if (CheckIniDirty(ini)) {
             ini->Reset();
@@ -1339,77 +1357,66 @@ void AccountInventoryWindow::LoadFromFiles(bool only_foreign)
                 free_slot.occupied_equipment = (int)(ini->GetLongValue(section, "occupiedequipment", 0));
                 free_slot.occupied_inventory = (int)(ini->GetLongValue(section, "occupiedinventory", 0));
                 free_slot.anniversary_pane_active = ini->GetBoolValue(section, "anniversary_pane_active", false);
-                free_slots_rebuild.insert(std::make_unique<CharacterFreeSlots>(free_slot));
+                free_slots.insert(std::make_unique<CharacterFreeSlots>(free_slot));
                 continue;
             }
 
-            InventoryItem i;
-            i.account = account;
-            i.character = character;
-            i.bag_id = (uint32_t)(ini->GetLongValue(section, "bagid", 1));
-            i.hero_id = (uint32_t)(ini->GetLongValue(section, "heroid", 0));
-            i.slot = (uint32_t)(ini->GetLongValue(section, "slot", 0));
+            auto i = std::make_unique<InventoryItem>();;
+            i->account = account;
+            i->character = character;
+            i->bag_id = (uint32_t)(ini->GetLongValue(section, "bagid", 1));
+            i->hero_id = (uint32_t)(ini->GetLongValue(section, "heroid", 0));
+            i->slot = (uint32_t)(ini->GetLongValue(section, "slot", 0));
 
             const char * info_string_b64 = ini->GetValue(section, "info", nullptr);
             if (info_string_b64) {
-                i.info_string = TextUtils::Base64Decode<wchar_t>(info_string_b64);
-                i.item_partial.info_string = i.info_string.data();
+                i->info_string = TextUtils::Base64Decode<wchar_t>(info_string_b64);
+                i->item_partial.info_string = i->info_string.data();
             }
             const char * single_item_name_b64 = ini->GetValue(section, "singleitemname", nullptr);
             if (single_item_name_b64) {
-                i.single_item_name = TextUtils::Base64Decode<wchar_t>(single_item_name_b64);
-                i.item_partial.single_item_name = i.single_item_name.data();
+                i->single_item_name = TextUtils::Base64Decode<wchar_t>(single_item_name_b64);
+                i->item_partial.single_item_name = i->single_item_name.data();
             }
             const char * complete_name_enc_b64 = ini->GetValue(section, "completename", nullptr);
             if (complete_name_enc_b64) {
-                i.complete_name_enc = TextUtils::Base64Decode<wchar_t>(complete_name_enc_b64);
-                i.item_partial.complete_name_enc = i.complete_name_enc.data();
+                i->complete_name_enc = TextUtils::Base64Decode<wchar_t>(complete_name_enc_b64);
+                i->item_partial.complete_name_enc = i->complete_name_enc.data();
             }
             const char * name_enc_b64 = ini->GetValue(section, "name", nullptr);
             if (name_enc_b64) {
-                i.name_enc = TextUtils::Base64Decode<wchar_t>(name_enc_b64);
-                i.item_partial.name_enc = i.name_enc.data();
+                i->name_enc = TextUtils::Base64Decode<wchar_t>(name_enc_b64);
+                i->item_partial.name_enc = i->name_enc.data();
             }
             const char * customized_b64 = ini->GetValue(section, "customized", nullptr);
             if (customized_b64) {
-                i.customized = TextUtils::Base64Decode<wchar_t>(customized_b64);
-                i.item_partial.customized = i.customized.data();
+                i->customized = TextUtils::Base64Decode<wchar_t>(customized_b64);
+                i->item_partial.customized = i->customized.data();
             }
-            i.item_partial.type = (GW::Constants::ItemType)(ini->GetLongValue(section, "type", 0));
-            i.item_partial.model_id = (uint32_t)(ini->GetLongValue(section, "modelid", 0));
-            i.item_partial.model_file_id = (uint32_t)(ini->GetLongValue(section, "modelfileid", 0));
-            i.item_partial.interaction = (uint32_t)(ini->GetLongValue(section, "interaction", 0));
-            i.item_partial.quantity = (uint16_t)(ini->GetLongValue(section, "quantity", 0));
-            i.item_partial.equipped = (uint8_t)(ini->GetLongValue(section, "equipped", 0));
-            i.item_partial.item_id = 0;
-            i.texture = Resources::GetItemImage(&i.item_partial);
-            i.location = HERO_NAME[i.hero_id];
-            if (IsChestBag(i.bag_id)) {
-                i.location = BAG_NAME[(int)(i.bag_id)];
+            i->item_partial.type = (GW::Constants::ItemType)(ini->GetLongValue(section, "type", 0));
+            i->item_partial.model_id = (uint32_t)(ini->GetLongValue(section, "modelid", 0));
+            i->item_partial.model_file_id = (uint32_t)(ini->GetLongValue(section, "modelfileid", 0));
+            i->item_partial.interaction = (uint32_t)(ini->GetLongValue(section, "interaction", 0));
+            i->item_partial.quantity = (uint16_t)(ini->GetLongValue(section, "quantity", 0));
+            i->item_partial.equipped = (uint8_t)(ini->GetLongValue(section, "equipped", 0));
+            i->item_partial.item_id = 0;
+            i->texture = Resources::GetItemImage(&i->item_partial);
+            i->location = HERO_NAME[i->hero_id];
+            if (IsChestBag(i->bag_id)) {
+                i->location = BAG_NAME[(int)(i->bag_id)];
             }
-            inventory_rebuild.insert(std::make_unique<InventoryItem>(i));
-            DescriptionDecode(i, &inventory_rebuild);
-        }
-    }
-    if (only_foreign) {
-        for (auto it = inventory.begin(); it != inventory.end();) {
-            if ((*it)->account == current_account) {
-                inventory_rebuild.insert(inventory.extract(it++));
-            } else ++it;
-        }
-        for (auto it = free_slots.begin(); it != free_slots.end(); ++it) {
-            if ((*it)->account == current_account) {
-                free_slots_rebuild.insert(free_slots.extract(it++));
-            } else ++it;
+            if (auto it = inventory.find(i); it != inventory.end()) {
+                inventory.erase(it);
+            }
+            auto i_raw = i.get();
+            inventory.insert(std::move(i));
+            DescriptionDecode(i_raw);
         }
     }
     for (auto it = ini_by_path.begin(); it != ini_by_path.end(); ++it) {
         if (!visited.contains(it->first)) it->second->Reset();
     }
-    free_slots = std::move(free_slots_rebuild);
-    inventory = std::move(inventory_rebuild);
     needs_sorting = true;
-*/
 }
 
 void AccountInventoryWindow::SaveToFiles(bool include_foreign)
@@ -1507,22 +1514,19 @@ void AccountInventoryWindow::SaveToFiles(bool include_foreign)
     inventory_dirty.clear();
 }
 
-void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventory_p)
+void AccountInventoryWindow::DescriptionDecode(InventoryItem *i)
 {
     struct SyncDecode {
-        std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual>* inventory;
+        std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual> *inventory;
         InventoryItem i;
         std::wstring enc;
+        bool *needs_sorting;
     };
-    auto sync = new SyncDecode{};
-    sync->inventory = inventory_p;
-    sync->i.account = i.account;
-    sync->i.character = i.character;
-    sync->i.hero_id = i.hero_id;
-    sync->i.bag_id = i.bag_id;
-    sync->i.slot = i.slot;
-    sync->i.item_partial.item_id = i.item_partial.item_id;
-    switch (i.item_partial.type) {
+    struct SyncDecode* sync = new SyncDecode();
+    sync->inventory = &inventory;
+    sync->needs_sorting = &needs_sorting;
+    i->CopyKeyTo(&sync->i);
+    switch (i->item_partial.type) {
         case GW::Constants::ItemType::Headpiece:
         case GW::Constants::ItemType::Boots:
         case GW::Constants::ItemType::Chestpiece:
@@ -1532,16 +1536,16 @@ void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_
             break;
         default:
             // Default to single_item_name so merge_stacks can combine stacks of single and multiple items.
-            if (i.item_partial.single_item_name) {
-                sync->enc += i.item_partial.single_item_name;
-            } else if (i.item_partial.complete_name_enc) {
-                sync->enc += i.item_partial.complete_name_enc;
-            } else if (i.item_partial.name_enc) {
-                sync->enc += i.item_partial.name_enc;
+            if (i->item_partial.single_item_name) {
+                sync->enc += i->item_partial.single_item_name;
+            } else if (i->item_partial.complete_name_enc) {
+                sync->enc += i->item_partial.complete_name_enc;
+            } else if (i->item_partial.name_enc) {
+                sync->enc += i->item_partial.name_enc;
             }
     }
-    if (i.item_partial.info_string) {
-        auto shorthand_description = ToolboxUtils::ShorthandItemDescription(&i.item_partial);
+    if (i->item_partial.info_string) {
+        auto shorthand_description = ToolboxUtils::ShorthandItemDescription(&i->item_partial);
         // If item info_string starts with "Value:", ShorthandItemDescription doesn't filter the "Value:" part out.
         // Since "Value:" is typically at the end of the description, there is nothing left that we care about anyway.
         // Add description only if it does not start with "Value:".
@@ -1552,15 +1556,16 @@ void AccountInventoryWindow::DescriptionDecode(InventoryItem &i, std::unordered_
             sync->enc += shorthand_description;
         }
     }
-    GW::UI::AsyncDecodeStr(sync->enc.c_str(), [](void* param, const wchar_t* s) {
-        auto sync = (struct SyncDecode *)param;
-        if (auto it = sync->inventory->find(&sync->i); it != sync->inventory->end()) {
-            if ((*it)->item_partial.item_id == sync->i.item_partial.item_id) {
+    GW::GameThread::Enqueue([sync] {
+        GW::UI::AsyncDecodeStr(sync->enc.c_str(), [](void* param, const wchar_t* s) {
+            auto sync = (struct SyncDecode *)param;
+            if (auto it = sync->inventory->find(&sync->i); it != sync->inventory->end()) {
                 (*it)->description = TextUtils::StripTags(s);
+                *sync->needs_sorting = true;
             }
-        }
-        delete sync;
-    }, sync);
+            delete sync;
+        }, sync);
+    });
 }
 
 void AccountInventoryWindow::AddItem(uint32_t item_id)
@@ -1571,27 +1576,27 @@ void AccountInventoryWindow::AddItem(uint32_t item_id)
     // gather information for this items storage location, i.e.:
     // account, player character, hero, bag, slot within bag
     std::wstring current_account = GetAccountEmail();
-    InventoryItem i;
-    i.account = current_account;
-    i.bag_id = (uint32_t)item->bag->bag_id();
-    if (IsChestBag(i.bag_id)) {
-        i.character = L"(Chest)";
+    auto i = std::make_unique<InventoryItem>();
+    i->account = current_account;
+    i->bag_id = (uint32_t)item->bag->bag_id();
+    if (IsChestBag(i->bag_id)) {
+        i->character = L"(Chest)";
     } else {
-        i.character = GW::AccountMgr::GetCurrentPlayerName();
-        if (i.character.empty()) {
-            i.character = L"Unavailable";
+        i->character = GW::AccountMgr::GetCurrentPlayerName();
+        if (i->character.empty()) {
+            i->character = L"Unavailable";
         }
     }
-    i.slot = item->slot;
+    i->slot = item->slot;
 
     // This is a workaround because I could not find a way to get a hero_id from an item currently equipped on a hero.
     // item->bag->bag_array is a separate array for each hero with only the Equipped_Items bag set, but seemingly no reference back to the hero.
     // The workaround uses the fact that items are added by GW in the order of the respective heroes in the party.
-    i.hero_id = GW::Constants::HeroID::NoHero;
-    if (i.bag_id == (uint32_t)GW::Constants::Bag::Equipped_Items && (GW::Inventory *)item->bag->bag_array != GW::Items::GetInventory()) {
+    i->hero_id = GW::Constants::HeroID::NoHero;
+    if (i->bag_id == (uint32_t)GW::Constants::Bag::Equipped_Items && (GW::Inventory *)item->bag->bag_array != GW::Items::GetInventory()) {
         // If we are loaded on a map when this module gets initialized, we will visit items in an arbitrary order
         // and therefore we are unable to guess which hero an item belongs to.
-        // In this case we can ass items on heroes only once we load into a new map or if the heroes are
+        // In this case we can add items on heroes only once we load into a new map or if the heroes are
         // removed and added again.
         if (initializing) return;
         // Outside of initialization, we get here when a hero is added or when a map is loaded.
@@ -1604,70 +1609,80 @@ void AccountInventoryWindow::AddItem(uint32_t item_id)
             }
             return;
         } else {
-            i.hero_id = bag_ptr_to_hero_id[item->bag];
+            i->hero_id = bag_ptr_to_hero_id[item->bag];
         }
     }
     // END hero_id workaround
 
     // gather members of item referenced in ShorthandItemDescription, GetItemImage or used by AccountInventoryWindow internally
     if (item->info_string) {
-        i.info_string = item->info_string;
-        i.item_partial.info_string = i.info_string.data();
+        i->info_string = item->info_string;
+        i->item_partial.info_string = i->info_string.data();
     }
     if (item->single_item_name) {
-        i.single_item_name = item->single_item_name;
-        i.item_partial.single_item_name = i.single_item_name.data();
+        i->single_item_name = item->single_item_name;
+        i->item_partial.single_item_name = i->single_item_name.data();
     }
     if (item->complete_name_enc) {
-        i.complete_name_enc = item->complete_name_enc;
-        i.item_partial.complete_name_enc = i.complete_name_enc.data();
+        i->complete_name_enc = item->complete_name_enc;
+        i->item_partial.complete_name_enc = i->complete_name_enc.data();
     }
     if (item->name_enc) {
-        i.name_enc = item->name_enc;
-        i.item_partial.name_enc = i.name_enc.data();
+        i->name_enc = item->name_enc;
+        i->item_partial.name_enc = i->name_enc.data();
     }
     if (item->customized) {
-        i.customized = item->customized;
-        i.item_partial.customized = i.customized.data();
+        i->customized = item->customized;
+        i->item_partial.customized = i->customized.data();
     }
-    i.item_partial.type = item->type;
-    i.item_partial.model_id = item->model_id;
-    i.item_partial.model_file_id = item->model_file_id;
-    i.item_partial.interaction = item->interaction;
-    i.item_partial.quantity = item->quantity;
-    i.item_partial.equipped = item->equipped;
-    i.item_partial.item_id = item->item_id;
-    i.texture = Resources::GetItemImage(&i.item_partial);
-    i.location = HERO_NAME[i.hero_id];
-    if (IsChestBag(i.bag_id)) {
-        i.location = BAG_NAME[(int)(i.bag_id)];
+    i->item_partial.type = item->type;
+    i->item_partial.model_id = item->model_id;
+    i->item_partial.model_file_id = item->model_file_id;
+    i->item_partial.interaction = item->interaction;
+    i->item_partial.quantity = item->quantity;
+    i->item_partial.equipped = item->equipped;
+    i->item_partial.item_id = item->item_id;
+    i->texture = Resources::GetItemImage(&i->item_partial);
+    i->location = HERO_NAME[i->hero_id];
+    if (IsChestBag(i->bag_id)) {
+        i->location = BAG_NAME[(int)(i->bag_id)];
     }
 
-    CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, i.character};
-    if (auto it = free_slots.find(&free_slot); it != free_slots.end()) {
-        if (i.bag_id == (uint32_t)GW::Constants::Bag::Equipment_Pack) {
-            (*it)->occupied_equipment++;
-        } else if (BAG_CAN_HOLD_ANYTHING[i.bag_id]) {
-            (*it)->occupied_inventory++;
+    CharacterFreeSlots free_slot = CharacterFreeSlots{current_account, i->character};
+    auto fs_it = free_slots.find(&free_slot);
+    if (fs_it != free_slots.end()) {
+        if (i->bag_id == (uint32_t)GW::Constants::Bag::Equipment_Pack) {
+            (*fs_it)->occupied_equipment++;
+        } else if (BAG_CAN_HOLD_ANYTHING[i->bag_id]) {
+            (*fs_it)->occupied_inventory++;
         }
     }
-    if (auto it = inventory.find(&i); it != inventory.end()) {
+    if (auto it = inventory.find(i); it != inventory.end()) {
         // found
         auto o_item_id = (*it)->item_partial.item_id;
         // make sure the lookup entry has not already been overwritten by another item being loaded during map load.
         if (inventory_lookup.contains(o_item_id) && inventory_lookup[o_item_id] == it->get()) {
             inventory_lookup.erase(o_item_id);
+            // when stacks a split or merged, the source and target stack will be readded by gw without being deleted first.
+            // if we already know the item in the source/target slot, the number of occupied spaces did not actually change.
+            if (fs_it != free_slots.end()) {
+                if (i->bag_id == (uint32_t)GW::Constants::Bag::Equipment_Pack) {
+                    (*fs_it)->occupied_equipment--;
+                } else if (BAG_CAN_HOLD_ANYTHING[i->bag_id]) {
+                    (*fs_it)->occupied_inventory--;
+                }
+            }
         }
         inventory.erase(it);
     }
-    inventory_dirty.insert(GetIniID(i.account, i.character));
-    auto ip = std::make_unique<InventoryItem>(i);
-    inventory_lookup[item->item_id] = ip.get();
-    inventory.insert(std::move(ip));
-    DescriptionDecode(i, &inventory);
+    inventory_dirty.insert(GetIniID(i->account, i->character));
+    auto i_raw = i.get();
+    inventory_lookup[item->item_id] = i_raw;
+    inventory.insert(std::move(i));
+    DescriptionDecode(i_raw);
     needs_sorting = true;
 
-    if (item_to_move && (uint32_t)GW::Constants::HeroID::NoHero != i.hero_id && ItemEqual{}(item_to_move, &i)) {
+    if (item_to_move && (uint32_t)GW::Constants::HeroID::NoHero != i_raw->hero_id && ItemEqual{}(item_to_move, i_raw)) {
         // If we had to change characters and item_to_move is on a player character,
         // then we get here during loading before MoveItem can work.
         // In that case StepReroll will take care of moving the item.
@@ -1707,7 +1722,7 @@ bool AccountInventoryWindow::RemoveItem(uint32_t item_id)
             (*it)->occupied_inventory--;
         }
     }
-    if (auto it = inventory.find(&i); it != inventory.end()) {
+    if (auto it = inventory.find(i); it != inventory.end()) {
         inventory.erase(it);
     }
     inventory_lookup.erase(item_id);
