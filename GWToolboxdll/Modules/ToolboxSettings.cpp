@@ -264,7 +264,7 @@ void ToolboxSettings::DrawSettingsInternal()
 
     ImGui::Checkbox("Save Location Data", &save_location_data);
     ImGui::ShowHelp("Toolbox will save your location every second in a file in Settings Folder.");
-    const auto cols = static_cast<size_t>(floor(ImGui::GetWindowWidth() / (170.0f * ImGui::GetIO().FontGlobalScale)));
+    const auto cols = static_cast<size_t>(floor(ImGui::GetWindowWidth() / (170.0f * ImGui::GetStyle().FontScaleMain)));
 
     ImGui::Separator();
     ImGui::PushID("global_enable");
