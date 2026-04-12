@@ -707,7 +707,7 @@ namespace GWArmory {
         const auto armor_item = (Armor*)wparam;
         ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_Button, ImColor(0, 0, 0, 0).Value);
-        const auto size = ImVec2(250.0f * ImGui::GetStyle().FontScaleMain, 0);
+        const auto size = ImVec2(250.0f * ImGui::FontScale(), 0);
         ImGui::TextUnformatted(armor_item->label);
         const auto chat_cmd = GetChatCommand(armor_item, &context_menu_piece);
         ImGui::TextDisabled(chat_cmd.c_str());
@@ -750,7 +750,7 @@ namespace GWArmory {
         const auto player_piece = &imgui_armor_pieces[slot];
         bool value_changed = false;
 
-        const float scale = ImGui::GetStyle().FontScaleMain;
+        const float scale = ImGui::FontScale();
 
         ImGui::Separator();
         ImGui::TextUnformatted(GetSlotName(slot));

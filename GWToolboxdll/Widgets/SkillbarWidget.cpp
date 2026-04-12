@@ -518,7 +518,7 @@ void SkillbarWidget::DrawDurationThresholds()
 {
     ImGui::Indent();
     ImGui::Text("Skill duration thresholds");
-    const float width = 150.f * ImGui::GetStyle().FontScaleMain;
+    const float width = 150.f * ImGui::FontScale();
     ImGui::PushID("long");
     ImGui::Text("Long: ");
     ImGui::SameLine(width);

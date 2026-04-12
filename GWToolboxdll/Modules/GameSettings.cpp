@@ -2319,7 +2319,7 @@ void GameSettings::DrawSettingsInternal()
 
     ImGui::Checkbox("Show warning when earned faction reaches ", &faction_warn_percent);
     ImGui::SameLine();
-    ImGui::PushItemWidth(40.0f * ImGui::GetStyle().FontScaleMain);
+    ImGui::PushItemWidth(40.0f * ImGui::FontScale());
     ImGui::InputInt("##faction_warn_percent_amount", &faction_warn_percent_amount, 0);
     ImGui::PopItemWidth();
     ImGui::SameLine();
