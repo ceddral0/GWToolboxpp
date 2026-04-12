@@ -333,7 +333,7 @@ void ToolboxTheme::DrawSettingsInternal()
     ImGui::Text("Note: theme is stored in 'Theme.ini' in settings folder. You can share the file or parts of it with other people.");
     ImGui::DragFloat("Global Alpha", &style.Alpha, 0.005f, 0.20f, 1.0f, "%.2f");
     style.Alpha = std::clamp(style.Alpha, 0.2f, 1.f);
-    ImGui::DragFloat("Global Font Scale", &ImGui::GetStyle().FontScaleMain, 0.005f, 0.3f, 2.0f, "%.1f");
+    ImGui::DragFloat("Global Font Scale", &ImGui::GetStyle().FontScaleMain, 0.005f, 0.3f, 2.0f, "%.2f");
     ImGui::Text("Sizes");
     ImGui::SliderFloat2("Window Padding", reinterpret_cast<float*>(&style.WindowPadding), 0.0f, 20.0f, "%.0f");
     ImGui::SliderFloat("Window Rounding", &style.WindowRounding, 0.0f, 16.0f, "%.0f");
