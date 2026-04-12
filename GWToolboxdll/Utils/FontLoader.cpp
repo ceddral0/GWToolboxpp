@@ -158,7 +158,6 @@ namespace {
     }
 
     // Build a single font by merging all available font files.
-    // Uses the base text size; callers use PushFont(font, desired_size) for dynamic scaling.
     ImFont* BuildFont(const float size, const bool default_only = false)
     {
         ImFontAtlas* atlas = ImGui::GetIO().Fonts;
@@ -167,8 +166,6 @@ namespace {
         cfg.PixelSnapH = true;
         cfg.OversampleH = 1;
         cfg.OversampleV = 1;
-
-        // Always load the default font
         cfg.MergeMode = false;
 
         if (default_only) {
@@ -201,93 +198,6 @@ namespace {
         return font;
     }
 
-    // Load fonts into memory; run on a separate thread.
-    void LoadFontsThread()
-    {
-        fonts_loading = true;
-        fonts_loaded = false;
-
-        while (!GImGui) {
-            Sleep(16);
-        }
-
-        printf("Loading fonts\n");
-
-        const float base_size = static_cast<float>(FontLoader::FontSize::text);
-
-        // Phase 1: Load default font quickly
-        ImFont* default_font = nullptr;
-        Resources::EnqueueDxTask([&default_font, base_size](IDirect3DDevice9*) {
-            default_font = BuildFont(base_size, true);
-            loaded_font = default_font;
-            printf("Loaded default font\n");
-            fonts_loaded = true;
-            fonts_loading = false;
-        });
-
-        // Wait for default font to be loaded before proceeding
-        while (!fonts_loaded) {
-            Sleep(16);
-        }
-
-        // Phase 2: Preload font file data on worker thread (disk I/O)
-        struct PreloadedFont {
-            void* data;
-            size_t data_size;
-            std::vector<ImWchar> glyph_ranges;
-        };
-        std::vector<PreloadedFont> preloaded;
-
-        for (const auto& [glyph_ranges, font_name] : GetFontData()) {
-            ASSERT(!font_name.empty());
-            const auto font_name_str = TextUtils::WStringToString(font_name);
-            size_t data_size;
-            void* data = ImFileLoadToMemory(font_name_str.c_str(), "rb", &data_size, 0);
-            if (data) {
-                preloaded.push_back({data, data_size, glyph_ranges});
-            }
-        }
-
-        if (preloaded.empty()) {
-            printf("No additional fonts found on disk\n");
-            return;
-        }
-
-        // Phase 3: Add preloaded fonts to the main atlas on the DX thread
-        Resources::EnqueueDxTask([fonts = std::move(preloaded), base_size](IDirect3DDevice9*) {
-            ImFontAtlas* atlas = ImGui::GetIO().Fonts;
-
-            ImFontConfig cfg;
-            cfg.PixelSnapH = true;
-            cfg.OversampleH = 1;
-            cfg.OversampleV = 1;
-
-            // Add all disk fonts, merging into a single ImFont
-            cfg.MergeMode = false;
-            ImFont* font = nullptr;
-            for (const auto& pf : fonts) {
-                // ImGui takes ownership of the data pointer
-                void* data_copy = ImGui::MemAlloc(pf.data_size);
-                memcpy(data_copy, pf.data, pf.data_size);
-                font = atlas->AddFontFromMemoryTTF(data_copy, pf.data_size, base_size, &cfg, pf.glyph_ranges.data());
-                cfg.MergeMode = true;
-            }
-
-            // Merge fontawesome icons
-            cfg.MergeMode = true;
-            atlas->AddFontFromMemoryCompressedTTF(fontawesome5_compressed_data, fontawesome5_compressed_size, base_size, &cfg, fontawesome5_glyph_ranges.data());
-
-            // Free the preloaded data (ImGui made its own copies)
-            for (const auto& pf : fonts) {
-                ImGui::MemFree(pf.data);
-            }
-
-            if (font) {
-                loaded_font = font;
-            }
-            printf("Loaded all fonts\n");
-        });
-    }
 }
 
 namespace FontLoader {
@@ -298,7 +208,7 @@ namespace FontLoader {
     }
 
     // Loads fonts asynchronously. CJK font files can be over 20mb in size!
-    void LoadFonts([[maybe_unused]] const bool force) // todo: reload fonts when this is true
+    void LoadFonts([[maybe_unused]] const bool force)
     {
         if (fonts_loading) {
             return;
@@ -311,7 +221,22 @@ namespace FontLoader {
         fonts_loading = true;
         fonts_loaded = false;
 
-        Resources::EnqueueWorkerTask(LoadFontsThread);
+        constexpr float base_size = static_cast<float>(FontSize::text);
+
+        Resources::EnqueueDxTask([base_size](IDirect3DDevice9*) {
+            loaded_font = BuildFont(base_size, true);
+            fonts_loaded = true;
+            fonts_loading = false;
+            printf("Loaded default font\n");
+        });
+
+        Resources::EnqueueDxTask([base_size](IDirect3DDevice9*) {
+            auto* font = BuildFont(base_size);
+            if (font) {
+                loaded_font = font;
+            }
+            printf("Loaded all fonts\n");
+        });
     }
 
     void Terminate()
