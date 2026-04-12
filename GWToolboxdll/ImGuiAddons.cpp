@@ -538,7 +538,7 @@ namespace ImGui {
     float GetImageRatio(ImTextureID user_texture_id) {
         if (!user_texture_id)
             return .0f;
-        const auto texture = (IDirect3DTexture9*)(intptr_t)user_texture_id;
+        const auto texture = static_cast<IDirect3DTexture9*>(user_texture_id);
         D3DSURFACE_DESC desc;
         const HRESULT res = texture->GetLevelDesc(0, &desc);
         if (!SUCCEEDED(res))
@@ -570,7 +570,7 @@ namespace ImGui {
     {
         if (!user_texture_id)
             return false;
-        const auto texture = (IDirect3DTexture9*)(intptr_t)user_texture_id;
+        const auto texture = static_cast<IDirect3DTexture9*>(user_texture_id);
         D3DSURFACE_DESC desc;
         const HRESULT res = texture->GetLevelDesc(0, &desc);
         if (!SUCCEEDED(res)) {
@@ -637,7 +637,7 @@ namespace ImGui {
         if (window->SkipItems)
             return false;
 
-        const void* id_ptr = user_texture_id ? (const void*)(intptr_t)user_texture_id : (const void*)window;
+        const auto id_ptr = user_texture_id ? user_texture_id : window;
         return ImageButtonEx(window->GetID(id_ptr), ImTextureRef(user_texture_id), image_size, uv0, uv1, bg_col, tint_col);
     }
     bool IsKeyDown(long key) {
@@ -656,7 +656,7 @@ namespace ImGui {
         GetWindowDrawList()->AddImage(user_texture_id, top_left, bottom_right, {0, 0}, CalculateUvCrop(user_texture_id, size));
     }
 
-    bool ColorPalette(const char* label, size_t* palette_index, const ImVec4* palette, const size_t count, const size_t max_per_line, const ImGuiColorEditFlags)
+    bool ColorPalette(const char* label, size_t* palette_index, const ImVec4* palette, const size_t count, const size_t max_per_line, const ImGuiColorEditFlags flags)
     {
         PushID(label);
         BeginGroup();
@@ -674,7 +674,7 @@ namespace ImGui {
             }
         }
 
-        {
+        if (!(flags & ImGuiColorEditFlags_AlphaOpaque)) {
             constexpr ImVec4 col;
             PushID(count);
             if (ColorButton("", col)) {
