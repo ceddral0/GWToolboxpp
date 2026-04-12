@@ -36,7 +36,7 @@ namespace ImGui {
 
     IMGUI_API float GetIndent();
 
-    // Shorthand for ImGui::GetIO().GlobalFontScale
+    // Shorthand for ImGui::GetStyle().FontScaleMain
     IMGUI_API const float& FontScale();
     // Initialise available width etc for adding spaced elements. Must be called before calling NextSpacedElement()
     IMGUI_API void StartSpacedElements(float width, bool include_font_scaling = true);

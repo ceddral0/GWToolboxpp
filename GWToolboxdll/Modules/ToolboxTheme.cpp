@@ -6,6 +6,7 @@
 #include <Modules/ToolboxTheme.h>
 
 #include "GWToolbox.h"
+#include <ImGuiAddons.h>
 
 constexpr auto IniFilename = L"Theme.ini";
 // @Enhancement: Allow users to save different layouts by changing this variable in settings
@@ -170,7 +171,7 @@ void ToolboxTheme::LoadUILayout()
     // Copy theme over
     ImGui::GetStyle() = ini_style;
     // Copy window positions over
-    ImGui::FontScale() = font_scale_main;
+    ImGui::GetStyle().FontScaleMain = font_scale_main;
 
     const auto ini = GetLayoutIni();
     const auto window_ini_section = "Windows";
@@ -333,7 +334,7 @@ void ToolboxTheme::DrawSettingsInternal()
     ImGui::Text("Note: theme is stored in 'Theme.ini' in settings folder. You can share the file or parts of it with other people.");
     ImGui::DragFloat("Global Alpha", &style.Alpha, 0.005f, 0.20f, 1.0f, "%.2f");
     style.Alpha = std::clamp(style.Alpha, 0.2f, 1.f);
-    ImGui::DragFloat("Global Font Scale", &ImGui::FontScale(), 0.005f, 0.3f, 2.0f, "%.2f");
+    ImGui::DragFloat("Global Font Scale", &ImGui::GetStyle().FontScaleMain, 0.005f, 0.3f, 2.0f, "%.2f");
     ImGui::Text("Sizes");
     ImGui::SliderFloat2("Window Padding", reinterpret_cast<float*>(&style.WindowPadding), 0.0f, 20.0f, "%.0f");
     ImGui::SliderFloat("Window Rounding", &style.WindowRounding, 0.0f, 16.0f, "%.0f");
