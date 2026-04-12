@@ -425,6 +425,10 @@ namespace {
         if (ImGui_ImplWin32_WndProcHandler(hWnd, Message, wParam, lParam) && !skip_mouse_capture)
             return TRUE;
 
+        // for some reason imgui 1.92 calls ::SetCapture on all mouse click events, need to release here :/
+        if (skip_mouse_capture && Message == WM_RBUTTONDOWN && ::GetCapture() == hWnd)
+            ::ReleaseCapture();
+
         // === Send events to toolbox ===
 
         /* GW Deliberately makes a WM_MOUSEMOVE event right after right button is pressed.

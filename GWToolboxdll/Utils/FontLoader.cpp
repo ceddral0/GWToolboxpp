@@ -172,7 +172,11 @@ namespace {
         cfg.MergeMode = false;
 
         if (default_only) {
-            return atlas->AddFontFromMemoryCompressedTTF(toolbox_default_font_compressed_data, toolbox_default_font_compressed_size, size, &cfg, toolbox_default_font_glyph_ranges);
+            auto* font = atlas->AddFontFromMemoryCompressedTTF(toolbox_default_font_compressed_data, toolbox_default_font_compressed_size, size, &cfg, toolbox_default_font_glyph_ranges);
+            cfg.MergeMode = true;
+            atlas->AddFontFromMemoryCompressedTTF(fontawesome5_compressed_data, fontawesome5_compressed_size, size, &cfg, fontawesome5_glyph_ranges.data());
+            cfg.MergeMode = false;
+            return font;
         }
 
         ImFont* font = nullptr;
