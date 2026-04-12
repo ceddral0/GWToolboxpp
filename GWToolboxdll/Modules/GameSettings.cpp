@@ -1286,12 +1286,8 @@ namespace {
         switch (message_id) {
             case GW::UI::UIMessage::kGetPreGameContext_Value0: {
                 hide_store_page_on_char_select && GW::UI::SetFrameVisible(GW::UI::GetFrameByLabel(L"Purchase"), false);
+                OverrideDefaultOnlineStatus();
             } break;
-            case GW::UI::UIMessage::kPreBuildLoginScene: {
-                GW::GameThread::Enqueue([] {
-                    OverrideDefaultOnlineStatus();
-                }, true);
-            }
             break;
             case GW::UI::UIMessage::kPartyShowConfirmDialog: {
                 const auto packet = static_cast<GW::UI::UIPacket::kPartyShowConfirmDialog*>(wParam);
@@ -2946,7 +2942,7 @@ void GameSettings::OnAgentNameTag(GW::HookStatus*, const GW::UI::UIMessage msgid
             tag->text_color = nametag_color_item;
             break;
     }
-    if (show_amount_of_lockpicks_under_locked_chest_nametag && tag->name_enc && wcscmp(tag->name_enc, L"\x8101\x6303\xf5ca\x9a4c\x71ff") == 0 && !tag->underline) {
+    if (show_amount_of_lockpicks_under_locked_chest_nametag && tag->name_enc && wcseq(tag->name_enc, GW::EncStrings::LockedChest) && !tag->underline) {
         static wchar_t you_have_n_lockpicks[12];
         const auto count = GW::Items::CountItemByModelId(GW::Constants::ItemID::Lockpick, (int)GW::Constants::Bag::Backpack, (int)GW::Constants::Bag::Bag_2);
         static wchar_t item_count[4];

@@ -44,6 +44,7 @@
 #include "Minimap.h"
 #include <Utils/FontLoader.h>
 #include <Utils/ToolboxUtils.h>
+#include <Constants/EncStrings.h>
 
 namespace {
     GW::HookEntry ChatCmd_HookEntry;
@@ -772,27 +773,15 @@ void Minimap::DrawHelp()
 void Minimap::SignalTerminate()
 {
     terminating = true;
-    GW::GameThread::Enqueue([] {
-        RefreshQuestMarker();
-        ResetWindowPosition(GW::UI::WindowID_Compass, compass_frame);
-        terminating = false;
-    });
-}
-
-void Minimap::Terminate()
-{
     GW::UI::RemoveKeydownCallback(&Generic_HookEntry);
     GW::UI::RemoveKeyupCallback(&Generic_HookEntry);
     GW::StoC::RemoveCallbacks(&Generic_HookEntry);
     GW::UI::RemoveUIMessageCallback(&Generic_HookEntry);
-
     GW::Hook::RemoveHook(DrawCompassAgentsByType_Func);
-
     GW::Chat::DeleteCommand(&ChatCmd_HookEntry);
 
     hide_flagging_controls_patch.Reset();
 
-    ToolboxWidget::Terminate();
     range_renderer.Terminate();
     pmap_renderer.Terminate();
     agent_renderer.Terminate();
@@ -801,6 +790,11 @@ void Minimap::Terminate()
     custom_renderer.Terminate();
     effect_renderer.Terminate();
     GameWorldRenderer::Terminate();
+    GW::GameThread::Enqueue([] {
+        RefreshQuestMarker();
+        ResetWindowPosition(GW::UI::WindowID_Compass, compass_frame);
+        terminating = false;
+    });
 }
 
 bool Minimap::CanTerminate()
@@ -1679,7 +1673,7 @@ void Minimap::SelectTarget(const GW::Vec2f pos)
     const GW::Agent* closest = nullptr;
 
     for (const auto* agent : *agents) {
-        const auto agent_is_locked_chest = agent && agent->GetIsGadgetType() && agent->GetAsAgentGadget()->gadget_id == GW::Constants::ModelID::LockedChest;
+        const auto agent_is_locked_chest = agent && agent->GetIsGadgetType() && wcseq(GW::Agents::GetAgentEncName(agent->agent_id), GW::EncStrings::LockedChest);
         if (!agent_is_locked_chest && !GW::Agents::GetAgentMatchesFlags(agent,GW::TargetFilter::AnyLiving)) continue;
         const float new_distance = GetSquareDistance(pos, agent->pos);
         if (distance > new_distance) {
