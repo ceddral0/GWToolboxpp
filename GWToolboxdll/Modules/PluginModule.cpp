@@ -261,13 +261,10 @@ void PluginModule::LoadSettings(ToolboxIni* ini)
         }
     }
     // Find any plugins that are currently loaded but not supposed to be
-    std::vector<Plugin*> to_unload;
-    for (const auto plugin : plugins_loaded) {
-        if (!std::ranges::contains(plugins_loaded_from_ini, plugin)) {
-            to_unload.push_back(plugin);
-        }
-    }
-    for (const auto plugin : to_unload) {
+    auto to_unload = std::views::filter(plugins_loaded, [&](auto plugin) {
+        return !std::ranges::contains(plugins_loaded_from_ini, plugin);
+    }) | std::ranges::to<std::vector>();
+    for (const auto plugin : std::views::reverse(to_unload)) {
         UnloadPlugin(plugin);
     }
 }
