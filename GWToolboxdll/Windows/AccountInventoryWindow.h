@@ -48,20 +48,25 @@ class AccountInventoryWindow : public ToolboxWindow {
         uint32_t bag_id{};
         uint32_t slot{};
 
-        // further attributes necessary to display items
-        GW::Item item_partial{}; // everything needed to get a ShorthandItemDescription and GetItemImage
-        // memory management for allocated item_partial members
-        std::wstring info_string{};
-        std::wstring single_item_name{};
-        std::wstring complete_name_enc{};
-        std::wstring name_enc{};
-        std::wstring customized{};
+        uint32_t model_id{};
+        uint32_t model_file_id{};
+        uint32_t interaction{};
+        uint16_t quantity{};
+        uint8_t equipped{};
+        std::wstring description{}; // output of AsyncDecodeStr(ShorthandItemDescription)
 
+        uint32_t item_id{};
         // caches, do not serialize
         IDirect3DTexture9** texture; // output of GetItemImage
-        std::wstring description{}; // output of AsyncDecodeStr(ShorthandItemDescription)
-        std::string location{}; // (Player) <Storage Pane> or <Hero Name>
+        std::wstring location{}; // (Player) <Storage Pane> or <Hero Name>
 
+        void CopyKeyTo(InventoryItem *i) {
+            i->account = account;
+            i->character = character;
+            i->hero_id = hero_id;
+            i->bag_id = bag_id;
+            i->slot = slot;
+        }
     };
 
     struct MergeStack;
@@ -69,14 +74,14 @@ class AccountInventoryWindow : public ToolboxWindow {
         ImGuiTableSortSpecs* sort_specs{};
         std::wstring current_account{};
         // used for order in Draw
-        bool operator()(const std::shared_ptr<MergeStack> lms, const std::shared_ptr<MergeStack> rms) const
+        bool operator()(const MergeStack &lms, const MergeStack &rms) const
         {
             int sort_direction = 1;
             int delta = 0;
-            if (rms->i.size() == 0) return false;
-            if (lms->i.size() == 0) return true;
-            auto l = *(lms->i.begin());
-            auto r = *(rms->i.begin());
+            if (rms.i.size() == 0) return false;
+            if (lms.i.size() == 0) return true;
+            auto l = *(lms.i.begin());
+            auto r = *(rms.i.begin());
             if (sort_specs) {
                 for (int n = 0; n < sort_specs->SpecsCount; n++) {
                     const ImGuiTableColumnSortSpecs* sort_spec = &sort_specs->Specs[n];
@@ -90,10 +95,10 @@ class AccountInventoryWindow : public ToolboxWindow {
                             delta = l->location.compare(r->location);
                             break;
                         case ItemColumnID_ModelID:
-                            delta = l->item_partial.model_id - r->item_partial.model_id;
+                            delta = l->model_id - r->model_id;
                             break;
                         case ItemColumnID_Description:
-                            delta = lms->description.compare(rms->description);
+                            delta = lms.description.compare(rms.description);
                             break;
                     }
                     if (delta != 0) return delta * sort_direction < 0;
@@ -108,25 +113,34 @@ class AccountInventoryWindow : public ToolboxWindow {
             return delta * sort_direction < 0;
         }
         // used for order inside MergeStack, i.e. for interaction and tooltip
-        bool operator()(const std::shared_ptr<InventoryItem> l, const std::shared_ptr<InventoryItem> r) const
+        bool operator()(InventoryItem *l, InventoryItem *r) const
         {
             if (l->account != r->account) {
                 // lowest item is the one that can be interacted with. Make sure it is one on this account if there is one
                 if (l->account == current_account) return true;
                 if (r->account == current_account) return false;
             }
-            auto lms = std::make_shared<MergeStack>(l->account);
-            lms->quantity = l->item_partial.quantity;
-            lms->i.insert(l);
-            auto rms = std::make_shared<MergeStack>(r->account);
-            rms->quantity = r->item_partial.quantity;
-            rms->i.insert(r);
+            auto lms = MergeStack(l->account, L"");
+            lms.quantity = l->quantity;
+            lms.i.insert(l);
+            auto rms = MergeStack(r->account, L"");
+            rms.quantity = r->quantity;
+            rms.i.insert(r);
             return this->operator()(lms, rms);
         }
     };
 
     struct ItemHash {
-        std::size_t operator()(const std::shared_ptr<InventoryItem> i) const noexcept
+        using is_transparent = void;
+        std::size_t operator()(const std::unique_ptr<InventoryItem> &i) const noexcept
+        {
+            return operator()(std::to_address(i));
+        }
+        std::size_t operator()(InventoryItem const * const * const i) const noexcept
+        {
+            return operator()(*i);
+        }
+        std::size_t operator()(InventoryItem const * const i) const noexcept
         {
             std::size_t h1 = std::hash<std::wstring>{}(i->account);
             std::size_t h2 = std::hash<std::wstring>{}(i->character);
@@ -138,7 +152,20 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct ItemEqual {
-        bool operator()(const std::shared_ptr<InventoryItem> l, const std::shared_ptr<InventoryItem> r) const
+        using is_transparent = void;
+        bool operator()(const std::unique_ptr<InventoryItem> &l, const std::unique_ptr<InventoryItem> &r) const
+        {
+            return operator()(std::to_address(l), std::to_address(r));
+        }
+        bool operator()(InventoryItem const * const l, const std::unique_ptr<InventoryItem> &r) const
+        {
+            return operator()(l, std::to_address(r));
+        }
+        bool operator()(InventoryItem const * const * const l, const std::unique_ptr<InventoryItem> &r) const
+        {
+            return operator()(*l, std::to_address(r));
+        }
+        bool operator()(InventoryItem const * const l, InventoryItem const * const r) const
         {
             return l->hero_id == r->hero_id && l->bag_id == r->bag_id && l->slot == r->slot && l->account == r->account && l->character == r->character;
         }
@@ -147,14 +174,9 @@ class AccountInventoryWindow : public ToolboxWindow {
     struct MergeStack {
         uint16_t quantity;
         std::wstring description;
-        std::set<std::shared_ptr<InventoryItem>, ItemCompare> i;
+        std::set<InventoryItem *, ItemCompare> i;
 
-        MergeStack(std::wstring account): quantity{}, description{}, i(ItemCompare{nullptr, account}) {}
-    };
-
-    struct QueueDescription {
-        const std::shared_ptr<InventoryItem> i{};
-        std::wstring description{};
+        MergeStack(std::wstring account, std::wstring _description): quantity{}, description(_description), i(ItemCompare{nullptr, account}) {}
     };
 
     struct CharacterFreeSlots {
@@ -170,7 +192,7 @@ class AccountInventoryWindow : public ToolboxWindow {
 
     struct SlotCompare {
         ImGuiTableSortSpecs* sort_specs{};
-        bool operator()(const std::shared_ptr<CharacterFreeSlots> l, const std::shared_ptr<CharacterFreeSlots> r) const
+        bool operator()(CharacterFreeSlots const * const l, CharacterFreeSlots const * const r) const
         {
             int sort_direction = 1;
             int delta = 0;
@@ -211,7 +233,16 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct SlotHash {
-        std::size_t operator()(const std::shared_ptr<CharacterFreeSlots> i) const noexcept
+        using is_transparent = void;
+        std::size_t operator()(const std::unique_ptr<CharacterFreeSlots> &i) const noexcept
+        {
+            return operator()(std::to_address(i));
+        }
+        std::size_t operator()(CharacterFreeSlots const * const * const i) const noexcept
+        {
+            return operator()(*i);
+        }
+        std::size_t operator()(CharacterFreeSlots const * const i) const noexcept
         {
             std::size_t h1 = std::hash<std::wstring>{}(i->account);
             std::size_t h2 = std::hash<std::wstring>{}(i->character);
@@ -220,7 +251,20 @@ class AccountInventoryWindow : public ToolboxWindow {
     };
 
     struct SlotEqual {
-        bool operator()(const std::shared_ptr<CharacterFreeSlots> l, const std::shared_ptr<CharacterFreeSlots> r) const
+        using is_transparent = void;
+        bool operator()(const std::unique_ptr<CharacterFreeSlots> &l, const std::unique_ptr<CharacterFreeSlots> &r) const
+        {
+            return operator()(std::to_address(l), std::to_address(r));
+        }
+        bool operator()(CharacterFreeSlots const * const l, const std::unique_ptr<CharacterFreeSlots> &r) const
+        {
+            return operator()(l, std::to_address(r));
+        }
+        bool operator()(CharacterFreeSlots const * const * const l, const std::unique_ptr<CharacterFreeSlots> &r) const
+        {
+            return operator()(*l, std::to_address(r));
+        }
+        bool operator()(CharacterFreeSlots const * const l, CharacterFreeSlots const * const r) const
         {
             return l->account == r->account && l->character == r->character;
         }
@@ -241,15 +285,15 @@ class AccountInventoryWindow : public ToolboxWindow {
         show_menubutton = can_show_in_main_window;
     }
 
-    void OnInventoryItemClicked(std::shared_ptr<InventoryItem> i, bool move);
-    static bool CheckIniDirty(std::shared_ptr<InventoryIni> ini);
-    std::shared_ptr<InventoryIni> GetIni(std::wstring ini_ID, std::wstring account);
-    std::string ItemToSectionName(std::shared_ptr<InventoryItem> i) const;
+    void OnInventoryItemClicked(InventoryItem *i, bool move);
+    static bool CheckIniDirty(InventoryIni *ini);
+    InventoryIni* GetIni(std::wstring ini_ID, std::wstring account);
+    std::string ItemToSectionName(InventoryItem *i) const;
     void LoadFromFiles(bool only_foreign);
     void SaveToFiles(bool include_foreign);
     void SortInventory(ImGuiTableSortSpecs* sort_specs);
     void SortSlots(ImGuiTableSortSpecs* sort_specs);
-    void QueueDescriptionDecode(std::shared_ptr<InventoryItem> i);
+    void DescriptionDecode(InventoryItem *i, GW::Item *item);
     void ClearMissingItem(std::wstring account, std::wstring character, uint32_t hero_id, uint32_t bag_id, uint32_t slot);
     // state machine for rerolling to items, internal functions
     void StepReroll();
@@ -260,22 +304,22 @@ class AccountInventoryWindow : public ToolboxWindow {
     // collective callback hook
     GW::HookEntry OnUIMessage_HookEntry{};
     // main item storage
-    std::unordered_set<std::shared_ptr<InventoryItem>, ItemHash, ItemEqual> inventory{};
+    std::unordered_set<std::unique_ptr<InventoryItem>, ItemHash, ItemEqual> inventory{};
     // On*SlotCleared send an item_id, but the information which bag and slot it was in
     // is already removed. In order to remove items from inventory without iterating,
     // we keep track of the item_id->InventoryItem mapping
-    std::unordered_map<uint32_t, std::shared_ptr<InventoryItem>> inventory_lookup{};
+    std::unordered_map<uint32_t, InventoryItem *> inventory_lookup{};
     // sorted/filtered view for display
-    std::vector<std::shared_ptr<MergeStack>> inventory_sorted{};
+    std::vector<MergeStack> inventory_sorted{};
     // ini files, 1 per character/chest
-    std::unordered_map<std::filesystem::path, std::shared_ptr<InventoryIni>> ini_by_path{};
-    std::unordered_map<std::wstring, std::shared_ptr<InventoryIni>> ini_by_character{};
+    std::unordered_map<std::filesystem::path, std::unique_ptr<InventoryIni>> ini_by_path{};
+    std::unordered_map<std::wstring, InventoryIni*> ini_by_character{};
     // change tracker to reduce writes
     std::unordered_set<std::wstring> inventory_dirty{};
     // tracking of free inventory slot numbers
-    std::unordered_set<std::shared_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots{};
+    std::unordered_set<std::unique_ptr<CharacterFreeSlots>, SlotHash, SlotEqual> free_slots{};
     // sorted/filtered view for display
-    std::set<std::shared_ptr<CharacterFreeSlots>, SlotCompare> free_slots_sorted{};
+    std::set<CharacterFreeSlots *, SlotCompare> free_slots_sorted{};
     // tracking for hero_id <-> Equipped_Items bag
     // we rely on hero items being created in the order of heroes in the party
     std::queue<GW::Bag *> hero_bag_generation_order{};
@@ -290,8 +334,6 @@ class AccountInventoryWindow : public ToolboxWindow {
     size_t filtered_item_count = 0;
     std::wstring last_character{};
     std::set<std::wstring> last_available_chars{};
-    std::mutex description_decode_lock{};
-    std::queue<std::shared_ptr<QueueDescription>> description_decode_queue;
     RerollStage reroll_stage = RerollStage::None;
     std::vector<GW::AvailableCharacterInfo> reroll_char_queue{};
     std::vector<uint32_t> reroll_hero_queue{};
@@ -299,8 +341,9 @@ class AccountInventoryWindow : public ToolboxWindow {
     clock_t add_hero_timer{};
     clock_t save_hero_timer{};
     clock_t map_loaded_delayed_timer{};
+    clock_t save_dirty_inventories_timer{};
     bool map_loaded_delayed_trigger = false;
-    std::shared_ptr<InventoryItem> item_to_move{};
+    InventoryItem *item_to_move = nullptr;
 
     // config options
     bool detailed_view = false;
@@ -324,8 +367,8 @@ public:
         return instance;
     }
 
-    [[nodiscard]] const char* Name() const override { return "Account Inventory"; }
-    [[nodiscard]] const char* Icon() const override { return ICON_FA_USERS; }
+    [[nodiscard]] const char *Name() const override { return "Account Inventory"; }
+    [[nodiscard]] const char *Icon() const override { return ICON_FA_USERS; }
 
     // callbacks
 
@@ -333,15 +376,15 @@ public:
     void Terminate() override;
     void Update(float delta) override;
 
-    void Draw(IDirect3DDevice9* pDevice) override;
+    void Draw(IDirect3DDevice9 * pDevice) override;
     void DrawSettingsInternal() override;
 
-    void LoadSettings(ToolboxIni* ini) override;
-    void SaveSettings(ToolboxIni* ini) override;
+    void LoadSettings(ToolboxIni * ini) override;
+    void SaveSettings(ToolboxIni * ini) override;
 
     void HandleHeroBag(uint32_t hero_id);
     void GatherAllInventories();
-    void OnItemTooltip(std::shared_ptr<MergeStack> ms);
+    void OnItemTooltip(const MergeStack *ms, std::wstring description);
     // handle inventory generation during map load
     void PreMapLoad();
     void PostMapLoad();
@@ -355,5 +398,5 @@ public:
     GW::Bag * OnPartyRemoveHero(uint32_t hero_id);
 
     void AddItem(uint32_t item_id);
-    void RemoveItem(uint32_t item_id);
+    bool RemoveItem(uint32_t item_id);
 };

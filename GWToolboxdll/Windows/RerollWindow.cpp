@@ -304,11 +304,7 @@ namespace {
         same_map = _same_map;
         same_party = _same_party;
         reroll_timeout = (reroll_stage_set = TIMER_INIT()) + 20000;
-        if (_do_not_prompt) {
-            reroll_stage = PendingLogout;
-        } else {
-            reroll_stage = PromptPendingLogout;
-        }
+        reroll_stage = _do_not_prompt ? PendingLogout : PromptPendingLogout;
         return true;
     }
 
