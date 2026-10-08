@@ -2125,7 +2125,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
         ImGui::TableSetupColumn("Equipment", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending, 0.f, SlotColumnID_Equipment);
         ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending, 0.f, SlotColumnID_EquipmentSize);
         ImGui::TableHeadersRow();
-        ImGui::TableNextRow();
         ImGuiTableSortSpecs* slot_sort_specs = ImGui::TableGetSortSpecs();
         if (needs_sorting || (slot_sort_specs && slot_sort_specs->SpecsDirty)) {
             SortSlots(slot_sort_specs);
@@ -2193,7 +2192,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
     ImGui::TableSetupColumn("Item", ImGuiTableColumnFlags_WidthFixed, 0.f, ItemColumnID_Description);
     ImGui::TableSetupScrollFreeze(3, 2);
     ImGui::TableHeadersRow();
-    ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -2212,7 +2210,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
     if (ImGui::InputText("###item_filter", item_filter_buf, _countof(item_filter_buf))) needs_sorting = true;
     ImGui::SameLine();
     ImGui::Text("Filter   %d/%d Items", filtered_item_count, item_refs.size());
-    ImGui::TableNextRow();
     ImGui::TableNextColumn();
 
     ImGuiTableSortSpecs* item_sort_specs = ImGui::TableGetSortSpecs();
@@ -2316,7 +2313,6 @@ void AccountInventoryWindow::Draw(IDirect3DDevice9*)
         clipper.Begin(item_count, ImGui::GetTextLineHeightWithSpacing());
         while (clipper.Step()) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
-                ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 render_item(i);
             }
